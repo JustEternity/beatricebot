@@ -5,11 +5,11 @@ import asyncpg
 async def connect_to_db():
     try:
         conn = await asyncpg.connect(
-            database="",  # Имя базы данных
-            user="",     # Имя пользователя
-            password="", # Пароль
-            host="",     # Хост
-            port="5432"  # Порт
+            database="",
+            user="",  
+            password="",
+            host="",     
+            port="5432" 
         )
         return conn
     except Exception as e:
