@@ -254,7 +254,7 @@ async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if save_user_to_db(context.user_data, telegram_id):
         await update.message.reply_text("✅ Ваши данные успешно сохранены в базе данных!")
     else:
-        await update.message.reply_text("❌ Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
+        await update.message.reply_text("❌ Произошла при сохранении данных. Пожалуйста, попробуйте позже.")
 
     return ConversationHandler.END
 
