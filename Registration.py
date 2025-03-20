@@ -22,9 +22,9 @@ POLICY_TEXT = """
 def connect_to_db():
     try:
         conn = psycopg2.connect(
-            dbname="beatrice",  # Имя вашей базы данных
-            user="postgres",  # Имя пользователя PostgreSQL
-            password="12345qwerty",  # Пароль пользователя
+            dbname="",  # Имя вашей базы данных
+            user="",  # Имя пользователя PostgreSQL
+            password="",  # Пароль пользователя
             host="localhost",  # Хост (обычно localhost)
             port="5432"  # Порт (по умолчанию 5432)
         )
@@ -43,7 +43,7 @@ def save_user_to_db(user_data, telegram_id):
 
             # Сохраняем данные в таблицу User
             query_user = sql.SQL("""
-                INSERT INTO "Users" (
+                INSERT INTO "users" (
                     TelegramID, Name, Age, Gender, City, ProfileDescription,
                     SubscriptionStatus, ModerationStatus, VerificationStatus,
                     RegistrationDate, LastActionDate, ProfilePriorityCoefficient,
@@ -98,8 +98,35 @@ def save_user_to_db(user_data, telegram_id):
     else:
         return False
 
+def is_user_registered(telegram_id):
+    conn = connect_to_db()
+    if conn:
+        try:
+            cur = conn.cursor()
+            query = sql.SQL("""
+                SELECT TelegramID FROM "users" WHERE TelegramID = %s
+            """)
+            cur.execute(query, (telegram_id,))
+            result = cur.fetchone()  # Получаем результат запроса
+            cur.close()
+            conn.close()
+            return result is not None  # Если результат есть, пользователь зарегистрирован
+        except Exception as e:
+            print(f"Ошибка при проверке регистрации пользователя: {e}")
+            return False
+    else:
+        return False
+
 # Функция для начала регистрации
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    telegram_id = update.message.from_user.id  # Получаем Telegram ID пользователя
+
+    # Проверяем, зарегистрирован ли пользователь
+    if is_user_registered(telegram_id):
+        await update.message.reply_text("✅ Готово к использованию!")
+        return ConversationHandler.END
+
+    # Если пользователь не зарегистрирован, продолжаем регистрацию
     keyboard = [["✅ Я согласен", "❌ Я не согласен"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text(POLICY_TEXT, reply_markup=reply_markup, parse_mode="Markdown")
