@@ -264,7 +264,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 def main() -> None:
-    token = '7646103564:AAGvbxZL8MAs52kK3NJVSrY3JPDRyIt2m4s'  # Замените на ваш токен
+    token = ''  # Замените на ваш токен
     application = Application.builder().token(token).build()
 
     # Определяем ConversationHandler
