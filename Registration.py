@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
@@ -62,6 +62,17 @@ async def connect_to_db():
     except Exception as e:
         logging.error(f"Ошибка подключения к базе данных: {e}")
         return None
+
+# Вспомогательная функция для очистки клавиатуры
+async def clear_keyboard(message: types.Message):
+    await message.answer("Продолжаем...", reply_markup=ReplyKeyboardRemove())
+
+    # Пример обработки ошибок при переходе между состояниями
+async def handle_state_transition_error(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    logging.error(f"Ошибка при переходе состояния: {current_state}")
+    await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова или нажмите /cancel для отмены.", 
+                        reply_markup=ReplyKeyboardRemove())
 
 # сохранения данных пользователя в бд
 async def save_user_to_db(user_data, telegram_id):
@@ -141,28 +152,32 @@ async def start(message: types.Message, state: FSMContext):
     await message.answer(POLICY_TEXT, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     await state.set_state(RegistrationStates.POLICY)
 
-# обработка согласия с опд
+# Обработка согласия с опд
 async def confirm_policy(message: types.Message, state: FSMContext):
     user_response = message.text
 
     if user_response == "✅ Я согласен":
-        await message.answer("🎉 Спасибо за согласие! Давайте начнем регистрацию. Как вас зовут?")
+        # Удаляем клавиатуру при переходе к следующему этапу
+        await message.answer("🎉 Спасибо за согласие! Давайте начнем регистрацию. Как вас зовут?", 
+                            reply_markup=ReplyKeyboardRemove())
         await state.set_state(RegistrationStates.NAME)
     elif user_response == "❌ Я не согласен":
-        await message.answer("🚫 Регистрация отменена. Если передумаете, нажмите /start.")
+        await message.answer("🚫 Регистрация отменена. Если передумаете, нажмите /start.", 
+                            reply_markup=ReplyKeyboardRemove())
         await state.clear()
     else:
         await message.answer("Пожалуйста, используйте кнопки ниже.")
 
-# обработка имени
+# Обработка имени
 async def get_name(message: types.Message, state: FSMContext):
     f = Fernet(os.getenv("cryptography_key"))
     encrypted_name = f.encrypt(message.text.encode())
     await state.update_data(name=encrypted_name)
+    # Не нужна клавиатура, поэтому не добавляем reply_markup
     await message.answer(f"👋 Приятно познакомиться, {message.text}! Сколько вам лет?")
     await state.set_state(RegistrationStates.AGE)
 
-# обработка возраста
+# Обработка возраста
 async def get_age(message: types.Message, state: FSMContext):
     try:
         age = int(message.text)
@@ -182,26 +197,28 @@ async def get_age(message: types.Message, state: FSMContext):
     except ValueError:
         await message.answer("Пожалуйста, введите число.")
 
-# обработка пола
+# Обработка пола
 async def get_gender(message: types.Message, state: FSMContext):
     user_response = message.text
 
     if user_response in ["👨 Мужской", "👩 Женский"]:
         await state.update_data(gender=user_response)
-        await message.answer("📍 Теперь напишите, где вы живете.")
+        # Удаляем клавиатуру при переходе к следующему этапу
+        await message.answer("📍 Теперь напишите, где вы живете.", reply_markup=ReplyKeyboardRemove())
         await state.set_state(RegistrationStates.LOCATION)
     else:
         await message.answer("Пожалуйста, выберите пол, используя кнопки ниже.")
 
-# обработка местоположения
+# Обработка местоположения
 async def get_location(message: types.Message, state: FSMContext):
     f = Fernet(os.getenv("cryptography_key"))
     encrypted_location = f.encrypt(message.text.encode())
     await state.update_data(location=encrypted_location)
+    # Не нужна клавиатура, поэтому не добавляем reply_markup
     await message.answer("📸 Теперь отправьте от 1 до 3 фотографий.")
     await state.set_state(RegistrationStates.PHOTOS)
 
-# обработка фотографий
+# Обработка фотографий
 async def get_photos(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     photos = user_data.get('photos', [])
@@ -212,7 +229,9 @@ async def get_photos(message: types.Message, state: FSMContext):
         await state.update_data(photos=photos)
 
         if len(photos) >= 3:
-            await message.answer("✅ Вы загрузили максимальное количество фото. Теперь напишите описание вашей анкеты.")
+            # Удаляем клавиатуру при переходе к следующему этапу
+            await message.answer("✅ Вы загрузили максимальное количество фото. Теперь напишите описание вашей анкеты.", 
+                               reply_markup=ReplyKeyboardRemove())
             await state.set_state(RegistrationStates.DESCRIPTION)
         else:
             keyboard = ReplyKeyboardMarkup(
@@ -228,29 +247,37 @@ async def get_photos(message: types.Message, state: FSMContext):
             if len(photos) == 0:
                 await message.answer("Пожалуйста, отправьте хотя бы одно фото.")
             else:
-                await message.answer("Теперь напишите описание вашей анкеты.")
+                # Удаляем клавиатуру при переходе к следующему этапу
+                await message.answer("Теперь напишите описание вашей анкеты.", reply_markup=ReplyKeyboardRemove())
                 await state.set_state(RegistrationStates.DESCRIPTION)
+        elif message.text == "📷 Добавить еще фото":
+            await message.answer("Пожалуйста, отправьте фото.")
         else:
             await message.answer("Пожалуйста, отправьте фото или нажмите 'Продолжить'.")
 
-# обработка описания анкеты
+# Обработка описания анкеты
 async def get_description(message: types.Message, state: FSMContext):
     f = Fernet(os.getenv("cryptography_key").encode())
     encrypted_description = f.encrypt(message.text.encode())
     await state.update_data(description=encrypted_description)
     user_data = await state.get_data()
 
+    # Дешифруем данные для отображения
+    name = f.decrypt(user_data['name']).decode() if isinstance(user_data['name'], bytes) else user_data['name']
+    location = f.decrypt(user_data['location']).decode() if isinstance(user_data['location'], bytes) else user_data['location']
+    description = message.text  # Используем исходный текст для отображения
+
     profile_text = (
         f"🎉 *Спасибо за регистрацию!*\n\n"
         f"📝 *Ваша анкета:*\n"
-        f"👤 *Имя:* {f.decrypt(user_data['name']).decode()}\n"
+        f"👤 *Имя:* {name}\n"
         f"📅 *Возраст:* {user_data['age']}\n"
         f"🚻 *Пол:* {user_data['gender']}\n"
-        f"📍 *Местоположение:* {f.decrypt(user_data['location']).decode()}\n"
-        f"📄 *Описание:* {f.decrypt(user_data['description']).decode()}\n\n"
+        f"📍 *Местоположение:* {location}\n"
+        f"📄 *Описание:* {description}\n\n"
     )
 
-    # создание списка медиафайлов для отправки
+    # Создание списка медиафайлов для отправки
     media_group = []
     for index, photo_id in enumerate(user_data['photos']):
         if index == 0:
@@ -333,7 +360,7 @@ async def show_main_menu(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")]
     ])
     
-    menu_message = await message.answer("🔹 Главное меню 🔹", reply_markup=keyboard)
+    menu_message = await message.answer("Главное меню: ", reply_markup=keyboard)
     
     # сохр ID сообщения в состоянии
     await state.update_data(last_menu_message_id=menu_message.message_id)
@@ -746,9 +773,26 @@ async def finish_test(message: types.Message, state: FSMContext):
 
 # возврат в главное меню
 async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
+    # Получаем текущее состояние и данные пользователя
+    current_state = await state.get_state()
     user_data = await state.get_data()
     
-    # создаем клавиатуру главного меню с кнопкой "Изменить анкету"
+    # Если мы находимся в состоянии редактирования, удаляем сообщение с запросом
+    if current_state in [
+        RegistrationStates.EDIT_NAME,
+        RegistrationStates.EDIT_AGE,
+        RegistrationStates.EDIT_LOCATION,
+        RegistrationStates.EDIT_PHOTOS,
+        RegistrationStates.EDIT_DESCRIPTION
+    ]:
+        # Удаляем сообщение с запросом ввода новых данных, если оно есть
+        if 'edit_message_id' in user_data and user_data['edit_message_id']:
+            try:
+                await callback.bot.delete_message(callback.from_user.id, user_data['edit_message_id'])
+            except Exception as e:
+                logging.error(f"Ошибка при удалении сообщения: {e}")
+    
+    # Создаем клавиатуру главного меню
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 Моя анкета", callback_data="view_profile")],
         [InlineKeyboardButton(text="✏️ Изменить анкету", callback_data="edit_profile")],
@@ -756,20 +800,27 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
     ])
     
     try:
-        menu_message = await callback.message.edit_text("🔹 Главное меню 🔹", reply_markup=keyboard)
+        # Редактируем или отправляем новое сообщение с главным меню
+        try:
+            menu_message = await callback.message.edit_text("🔹 Главное меню 🔹", reply_markup=keyboard)
+        except Exception as e:
+            logging.error(f"Ошибка при редактировании сообщения: {e}")
+            menu_message = await callback.message.answer("🔹 Главное меню 🔹", reply_markup=keyboard)
+        
         await state.update_data(profile_menu_message_id=menu_message.message_id)
     except Exception as e:
-        logging.error(f"Ошибка при редактировании сообщения: {e}")
+        logging.error(f"Ошибка при возврате в меню: {e}")
         menu_message = await callback.message.answer("🔹 Главное меню 🔹", reply_markup=keyboard)
         await state.update_data(profile_menu_message_id=menu_message.message_id)
     
-    # устанавливаем состояние MAIN_MENU
+    # Устанавливаем состояние MAIN_MENU
     await state.set_state(RegistrationStates.MAIN_MENU)
     await callback.answer()
 
 # обработчик кнопки "Изменить имя"
 async def edit_name_handler(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите новое имя:")
+    edit_message = await callback.message.answer("Введите новое имя:")
+    await state.update_data(edit_message_id=edit_message.message_id)
     await state.set_state(RegistrationStates.EDIT_NAME)
     await callback.answer()
 
@@ -807,7 +858,8 @@ async def process_edit_name(message: types.Message, state: FSMContext):
 
 # обработчик кнопки "Изменить возраст"
 async def edit_age_handler(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите новый возраст:")
+    edit_message = await callback.message.answer("Введите новый возраст:")
+    await state.update_data(edit_message_id=edit_message.message_id)
     await state.set_state(RegistrationStates.EDIT_AGE)
     await callback.answer()
 
@@ -840,7 +892,8 @@ async def process_edit_age(message: types.Message, state: FSMContext):
 
 # обработчик кнопки "Изменить местоположение"
 async def edit_location_handler(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите новое местоположение:")
+    edit_message = await callback.message.answer("Введите новое местоположение:")
+    await state.update_data(edit_message_id=edit_message.message_id)
     await state.set_state(RegistrationStates.EDIT_LOCATION)
     await callback.answer()
 
@@ -868,7 +921,8 @@ async def process_edit_location(message: types.Message, state: FSMContext):
 
 # обработчик кнопки "Изменить описание"
 async def edit_description_handler(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите новое описание анкеты:")
+    edit_message = await callback.message.answer("Введите новое описание анкеты:")
+    await state.update_data(edit_message_id=edit_message.message_id)
     await state.set_state(RegistrationStates.EDIT_DESCRIPTION)
     await callback.answer()
 
@@ -896,10 +950,9 @@ async def process_edit_description(message: types.Message, state: FSMContext):
 
 # обработчик кнопки "Изменить фото"
 async def edit_photos_handler(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Отправьте новые фотографии (до 3 штук). Старые фотографии будут заменены.")
+    edit_message = await callback.message.answer("Отправьте новые фотографии (до 3 штук). Старые фотографии будут заменены.")
+    await state.update_data(edit_message_id=edit_message.message_id, edit_photos=[])
     await state.set_state(RegistrationStates.EDIT_PHOTOS)
-    # очищаем список фотографий в состоянии
-    await state.update_data(edit_photos=[])
     await callback.answer()
 
 # обработчик загрузки новых фоток
@@ -913,7 +966,9 @@ async def process_edit_photos(message: types.Message, state: FSMContext):
         await state.update_data(edit_photos=photos)
         
         if len(photos) >= 3:
-            # если загружено максимальное количество фоток, сохраняем их
+            # Если загружено максимальное количество фоток, сохраняем их
+            # Удаляем клавиатуру
+            await message.answer("Максимальное количество фото загружено.", reply_markup=ReplyKeyboardRemove())
             await save_edited_photos(message, photos, state)
         else:
             keyboard = ReplyKeyboardMarkup(
@@ -928,6 +983,8 @@ async def process_edit_photos(message: types.Message, state: FSMContext):
         if len(photos) == 0:
             await message.answer("Пожалуйста, отправьте хотя бы одно фото.")
         else:
+            # Удаляем клавиатуру
+            await message.answer("Сохраняем фотографии...", reply_markup=ReplyKeyboardRemove())
             await save_edited_photos(message, photos, state)
     else:
         await message.answer("Пожалуйста, отправьте фото или нажмите 'Сохранить фото'.")
@@ -937,26 +994,27 @@ async def save_edited_photos(message: types.Message, photos, state: FSMContext):
     conn = await connect_to_db()
     if conn:
         try:
-            # удаляем старые фотографии
+            # Удаляем старые фотографии
             await conn.execute("""
                 DELETE FROM photos WHERE usertelegramid = $1
             """, message.from_user.id)
             
-            # добавляем новые фотографии
+            # Добавляем новые фотографии
             for index, photo_id in enumerate(photos):
                 await conn.execute("""
                     INSERT INTO photos (usertelegramid, photofileid, photodisplayorder)
                     VALUES ($1, $2, $3)
                 """, message.from_user.id, photo_id, index + 1)
             
-            await message.answer("✅ Фотографии успешно обновлены!")
+            # Удаляем клавиатуру
+            await message.answer("✅ Фотографии успешно обновлены!", reply_markup=ReplyKeyboardRemove())
         except Exception as e:
             logging.error(f"Ошибка при обновлении фотографий: {e}")
-            await message.answer("❌ Произошла ошибка при обновлении фотографий.")
+            await message.answer("❌ Произошла ошибка при обновлении фотографий.", reply_markup=ReplyKeyboardRemove())
         finally:
             await conn.close()
     
-    # возвращаемся в меню редактирования
+    # Возвращаемся в меню редактирования
     await edit_profile(await message.answer("Выберите, что еще хотите изменить:"), state)
 
 # обработчик команды /menu
@@ -980,6 +1038,7 @@ async def main():
     dp.message.register(get_description, RegistrationStates.DESCRIPTION)
     dp.message.register(cancel, Command("cancel"))
     
+    
     # регистрируем обработчики для редактирования анкеты
     dp.message.register(process_edit_name, RegistrationStates.EDIT_NAME)
     dp.message.register(process_edit_age, RegistrationStates.EDIT_AGE)
@@ -999,11 +1058,13 @@ async def main():
     dp.callback_query.register(edit_location_handler, F.data == "edit_location")
     dp.callback_query.register(edit_photos_handler, F.data == "edit_photos")
     dp.callback_query.register(edit_description_handler, F.data == "edit_description")
+    dp.callback_query.register(back_to_menu, F.data == "back_to_menu")
 
     # регистрация обработчиков для теста
     dp.callback_query.register(take_test, F.data == "take_test")
     dp.callback_query.register(confirm_test, F.data == "confirm_test")
     dp.callback_query.register(process_test_answer, F.data.startswith("answer_"))
+    
 
     await dp.start_polling(bot)
 
