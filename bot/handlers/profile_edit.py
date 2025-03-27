@@ -21,22 +21,32 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
 
     # Получаем данные пользователя
     user_data = await db.get_user_data(callback.from_user.id)
+    logger.debug(f"Retrieved profile data with keys: {list(user_data.keys())}")
 
     # Декодируем зашифрованные данные
     name = crypto.decrypt(user_data['name']).decode() if isinstance(crypto.decrypt(user_data['name']), bytes) else crypto.decrypt(user_data['name'])
     location = crypto.decrypt(user_data['location']).decode() if isinstance(crypto.decrypt(user_data['location']), bytes) else crypto.decrypt(user_data['location'])
     description = crypto.decrypt(user_data['description']).decode() if isinstance(crypto.decrypt(user_data['description']), bytes) else crypto.decrypt(user_data['description'])
 
+    # Преобразуем пол в читаемый формат
+    gender_value = user_data['gender']
+    if gender_value == '0' or gender_value == 0:
+        gender_display = "👨 Мужской"
+    elif gender_value == '1' or gender_value == 1:
+        gender_display = "👩 Женский"
+    else:
+        gender_display = "Не указан"
 
     # Формируем текст анкеты
     profile_text = (
         f"👤 *Ваша анкета:*\n\n"
         f"*Имя:* {name}\n"
         f"*Возраст:* {user_data['age']}\n"
-        f"*Пол:* {user_data['gender']}\n"
+        f"*Пол:* {gender_display}\n"
         f"*Местоположение:* {location}\n"
         f"*Описание:* {description}"
     )
+
 
     # Если есть фото
     if user_data['photos']:

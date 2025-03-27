@@ -5,26 +5,30 @@ from aiogram.fsm.context import FSMContext
 
 logger = logging.getLogger(__name__)
 
-async def delete_previous_messages(
-    source: Union[Message, CallbackQuery],
-    state: FSMContext
-) -> None:
-    """Удаляет предыдущие сообщения бота из чата"""
+async def delete_previous_messages(message, state):
+    """Удаляет предыдущие сообщения бота"""
     try:
         data = await state.get_data()
-        if 'last_menu_message_id' in data:
-            await source.bot.delete_message(
-                chat_id=source.from_user.id,
-                message_id=data['last_menu_message_id']
-            )
-        if 'profile_photo_message_ids' in data:
-            for msg_id in data['profile_photo_message_ids']:
-                await source.bot.delete_message(
-                    chat_id=source.from_user.id,
-                    message_id=msg_id
-                )
+        message_ids = data.get('message_ids', [])
+        
+        if not message_ids:
+            return
+        
+        # Удаляем сообщения
+        deleted_count = 0
+        for msg_id in message_ids:
+            try:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
+                deleted_count += 1
+            except Exception as e:
+                # Логируем ошибку только на уровне DEBUG, а не ERROR
+                logger.debug(f"Could not delete message {msg_id}: {e}")
+        
+        # Очищаем список сообщений
+        await state.update_data(message_ids=[])
+        logger.debug(f"Deleted {deleted_count}/{len(message_ids)} messages")
     except Exception as e:
-        logger.error(f"Error deleting messages: {e}")
+        logger.debug(f"Error in delete_previous_messages: {e}")
 
 def validate_age(age_str: str) -> Optional[int]:
     """Проверяет валидность возраста"""
@@ -37,6 +41,9 @@ def validate_age(age_str: str) -> Optional[int]:
 async def format_profile_text(user_data: Dict, crypto=None) -> str:
     """Форматирует текст профиля пользователя"""
     try:
+        # Логируем только базовую информацию без полных данных
+        logger.debug(f"Formatting profile with keys: {list(user_data.keys())}")
+        
         # Проверяем, что crypto не None
         if crypto is None:
             logger.warning("Crypto object is None in format_profile_text")
@@ -63,18 +70,49 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
         if decrypted_data.get('interests'):
             profile_text += f"<b>Интересы:</b>\n{decrypted_data.get('interests')}\n\n"
         
-        if decrypted_data.get('gender') is not None:
-            gender = "Мужской" if decrypted_data.get('gender') == 0 else "Женский"
-            profile_text += f"<b>Пол:</b> {gender}\n"
+        # Преобразуем значение пола в читаемый формат
+        gender_value = decrypted_data.get('gender')
         
-        if decrypted_data.get('looking_for') is not None:
-            looking_for = "Мужчин" if decrypted_data.get('looking_for') == 0 else "Женщин"
-            profile_text += f"<b>Ищет:</b> {looking_for}\n"
+        # Определяем отображаемый пол
+        if gender_value == '0' or gender_value == 0:
+            gender_display = "👨 Мужской"
+        elif gender_value == '1' or gender_value == 1:
+            gender_display = "👩 Женский"
+        else:
+            gender_display = "Не указан"
+        
+        profile_text += f"<b>Пол:</b> {gender_display}\n"
+        
+        # Преобразуем предпочтения в читаемый формат
+        looking_for = decrypted_data.get('looking_for')
+        if looking_for is not None:
+            # Определяем предпочтения в читаемом формате
+            if str(looking_for) == '0' or looking_for == 0:
+                looking_for_display = "👨 Мужчин"
+            else:
+                looking_for_display = "👩 Женщин"
+            
+            profile_text += f"<b>Ищет:</b> {looking_for_display}\n"
         
         return profile_text
     except Exception as e:
         logger.error(f"Error formatting profile text: {e}")
+        logger.exception(e)
         return "Ошибка при отображении профиля"
+    
+def standardize_gender(gender_value):
+    """Стандартизирует значение пола к строковому формату: '0' - мужской, '1' - женский"""
+    logger.debug(f"Standardizing gender value: {gender_value}, type: {type(gender_value)}")
+    
+    # Преобразуем к строчным буквам, если это строка
+    if isinstance(gender_value, str):
+        gender_value = gender_value.lower()
+    
+    # Проверяем различные варианты мужского пола
+    if gender_value in [0, '0', 'male', 'м', 'мужской', 'мужчина', '👨 мужской']:
+        return '0'  # Возвращаем строку
+    else:
+        return '1'  # Возвращаем строку
 
 
 def handle_errors(func):
