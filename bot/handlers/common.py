@@ -8,7 +8,7 @@ from bot.services.database import Database
 from bot.keyboards.menus import main_menu
 from bot.services.utils import delete_previous_messages
 from bot.services.encryption import CryptoService
-from bot.texts.registration import POLICY_TEXT
+from bot.texts.textforbot import POLICY_TEXT
 
 import logging
 logger = logging.getLogger(__name__)

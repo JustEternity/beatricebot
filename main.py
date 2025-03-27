@@ -6,6 +6,7 @@ from bot.config import load_config
 from bot.handlers import routers
 from bot.services.database import Database
 from bot.services.encryption import CryptoService
+from bot.handlers.algorithm import router as compatibility_router
 
 logging.basicConfig(
     level=logging.DEBUG,

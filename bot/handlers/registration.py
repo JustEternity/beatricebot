@@ -12,7 +12,7 @@ from bot.services.encryption import CryptoService
 from bot.services.utils import delete_previous_messages
 from bot.keyboards.menus import policy_keyboard
 from bot.texts.textforbot import POLICY_TEXT
-from bot.services.s3storage import S3Service
+# from bot.services.s3storage import S3Service
 
 from io import BytesIO
 import logging
@@ -82,82 +82,32 @@ async def location_handler(message: Message, state: FSMContext, crypto: CryptoSe
     await state.set_state(RegistrationStates.PHOTOS)
 
 @router.message(RegistrationStates.PHOTOS, F.photo | F.text)
-async def photos_handler(
-    message: Message,
-    state: FSMContext,
-    bot: Bot,
-    s3: S3Service
-):
+async def photos_handler(message: Message, state: FSMContext):
     data = await state.get_data()
-    photos = data.get("photos", [])  # Теперь будет хранить словари
+    photos = data.get("photos", [])
 
     if message.photo:
         if len(photos) >= 3:
             await message.answer("⚠️ Максимум 3 фотографии")
             return
 
-        # Отправляем индикатор загрузки
-        await message.answer("⏳ Загружаю фото...")
+        photos.append(message.photo[-1].file_id)
+        await state.update_data(photos=photos)
 
-        try:
-            photo = message.photo[-1]  # Берем самое качественное фото
-            file_id = photo.file_id
+        builder = ReplyKeyboardBuilder()
+        builder.add(KeyboardButton(text="📷 Добавить еще"))
+        builder.add(KeyboardButton(text="✅ Продолжить"))
 
-            # Проверяем размер фото
-            if photo.file_size and photo.file_size > 5 * 1024 * 1024:  # 5MB
-                await message.answer("⚠️ Фото слишком большое. Максимальный размер - 5MB")
-                return
-
-            # Скачиваем и загружаем в S3
-            file_data = BytesIO()
-            await bot.download(file_id, destination=file_data)
-            file_data.seek(0)
-
-            s3_url = await s3.upload_photo(file_data, message.from_user.id)
-            file_data.close()
-
-            if not s3_url:
-                await message.answer("🚫 Не удалось загрузить фото. Попробуйте другое изображение.")
-                return
-
-            # Сохраняем оба идентификатора
-            photos.append({
-                "file_id": file_id,
-                "s3_url": s3_url
-            })
-
-            await state.update_data(photos=photos)
-
-            builder = ReplyKeyboardBuilder()
-            if len(photos) < 3:
-                builder.add(KeyboardButton(text="📷 Добавить еще"))
-            builder.add(KeyboardButton(text="✅ Продолжить"))
-
-            await message.answer(
-                f"✅ Добавлено {len(photos)}/3 фото",
-                reply_markup=builder.as_markup(resize_keyboard=True)
-            )
-
-        except Exception as e:
-            await message.answer("🚫 Ошибка обработки фото. Попробуйте еще раз.")
-            logger.error(f"Photo processing error for user {message.from_user.id}: {e}")
-
-    elif message.text == "📷 Добавить еще":
-        await message.answer("📸 Отправьте следующее фото")
-
+        await message.answer(
+            f"✅ Добавлено {len(photos)}/3 фото",
+            reply_markup=builder.as_markup(resize_keyboard=True)
+        )
     elif message.text == "✅ Продолжить":
         if not photos:
             await message.answer("⚠️ Нужно добавить хотя бы 1 фото")
-            return
-
-        await message.answer(
-            "✏️ Напишите описание вашего профиля:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        await state.set_state(RegistrationStates.DESCRIPTION)
-
-    else:
-        await message.answer("📸 Отправьте фото или выберите действие на клавиатуре")
+        else:
+            await message.answer("✏️ Напишите описание вашего профиля:", reply_markup=ReplyKeyboardRemove())
+            await state.set_state(RegistrationStates.DESCRIPTION)
 
 @router.message(RegistrationStates.DESCRIPTION)
 async def description_handler(
