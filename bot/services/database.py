@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Union, Tuple
 from bot.models.user import UserDB
+from bot.services.utils import standardize_gender
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,22 @@ class Database:
                 logger.debug(f"User data: { {k: v for k, v in user_data.items() if k != 'photos'} }")
                 logger.debug(f"Photos count: {len(user_data['photos'])}")
 
+                # Получаем исходное значение пола
+                gender_value = user_data['gender']
+                logger.debug(f"Original gender value: {gender_value}, type: {type(gender_value)}")
+
+                # Преобразуем к строчным буквам, если это строка
+                if isinstance(gender_value, str):
+                    gender_value = gender_value.lower()
+
+                # Проверяем различные варианты мужского пола
+                if gender_value in [0, '0', 'male', 'м', 'мужской', 'мужчина', '👨 мужской']:
+                    standardized_gender = '0'  # Преобразуем в строку
+                    logger.debug("Standardized to male ('0')")
+                else:
+                    standardized_gender = '1'  # Преобразуем в строку
+                    logger.debug("Standardized to female ('1')")
+
                 # Сохранение основных данных
                 await conn.execute("""
                     INSERT INTO users (
@@ -65,7 +82,7 @@ class Database:
                         profiledescription, registrationdate, lastactiondate
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """, telegram_id, user_data['name'], user_data['age'],
-                    user_data['gender'], user_data['location'],
+                    standardized_gender, user_data['location'],
                     user_data['description'], datetime.now(), datetime.now())
 
                 # Сохранение фотографий
@@ -304,31 +321,21 @@ class Database:
                 logger.error(f"Error getting answers for user {user_id}: {e}")
                 return {}
     
-    async def get_answer_weights(self) -> Dict[int, Dict[int, float]]:
-        """Получение весов ответов для расчета совместимости"""
-        logger.debug("Fetching answer weights")
-        async with self.pool.acquire() as conn:
-            try:
-                rows = await conn.fetch(
-                    "SELECT questionid, answerid, answerweight FROM answers"
-                )
-                
-                weights = {}
-                for row in rows:
-                    question_id = row['questionid']
-                    answer_id = row['answerid']
-                    weight = row['answerweight'] if 'answerweight' in row else 0.0
-                    
-                    if question_id not in weights:
-                        weights[question_id] = {}
-                    
-                    weights[question_id][answer_id] = weight
-                
-                logger.debug(f"Loaded weights for {len(weights)} questions")
-                return weights
-            except Exception as e:
-                logger.error(f"Error getting answer weights: {e}")
-                return {}
+    async def get_answer_weights(self):
+        """Получает веса ответов для вопросов (использует веса по умолчанию)"""
+        try:
+            # Получаем все ID вопросов
+            query = "SELECT questionid FROM questions"
+            result = await self.execute_query(query)
+            
+            # Создаем словарь с весами по умолчанию (1.0) для всех вопросов
+            weights = {row[0]: 1.0 for row in result} if result else {}
+            
+            logger.debug(f"Using default weights for {len(weights)} questions")
+            return weights
+        except Exception as e:
+            logger.error(f"Error getting question IDs: {e}")
+            return {}
     
     async def get_users_with_answers(self, exclude_user_id: int = None) -> List[int]:
         """Получение списка пользователей, прошедших тест"""

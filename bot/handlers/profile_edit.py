@@ -5,6 +5,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.enums import ParseMode
 
 from bot.models.states import RegistrationStates
+from bot.services.city_validator import city_validator
 from bot.services.database import Database
 from bot.services.encryption import CryptoService
 from bot.keyboards.menus import edit_profile_keyboard, view_profile, has_answers_keyboard, back_to_menu_button
@@ -21,22 +22,32 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
 
     # Получаем данные пользователя
     user_data = await db.get_user_data(callback.from_user.id)
+    logger.debug(f"Retrieved profile data with keys: {list(user_data.keys())}")
 
     # Декодируем зашифрованные данные
     name = crypto.decrypt(user_data['name']).decode() if isinstance(crypto.decrypt(user_data['name']), bytes) else crypto.decrypt(user_data['name'])
     location = crypto.decrypt(user_data['location']).decode() if isinstance(crypto.decrypt(user_data['location']), bytes) else crypto.decrypt(user_data['location'])
     description = crypto.decrypt(user_data['description']).decode() if isinstance(crypto.decrypt(user_data['description']), bytes) else crypto.decrypt(user_data['description'])
 
+    # Преобразуем пол в читаемый формат
+    gender_value = user_data['gender']
+    if gender_value == '0' or gender_value == 0:
+        gender_display = "👨 Мужской"
+    elif gender_value == '1' or gender_value == 1:
+        gender_display = "👩 Женский"
+    else:
+        gender_display = "Не указан"
 
     # Формируем текст анкеты
     profile_text = (
         f"👤 *Ваша анкета:*\n\n"
         f"*Имя:* {name}\n"
         f"*Возраст:* {user_data['age']}\n"
-        f"*Пол:* {user_data['gender']}\n"
+        f"*Пол:* {gender_display}\n"
         f"*Местоположение:* {location}\n"
         f"*Описание:* {description}"
     )
+
 
     # Если есть фото
     if user_data['photos']:
@@ -140,10 +151,16 @@ async def edit_location_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.message(RegistrationStates.EDIT_LOCATION)
 async def process_edit_location(message: Message, state: FSMContext, crypto: CryptoService, db: Database):
-    encrypted_location = crypto.encrypt(message.text)
+    is_valid, normalized_city = city_validator.validate_city(message.text)
+
+    if not is_valid:
+        await message.answer("⚠️ Город не найден. Пожалуйста, введите существующий российский город")
+        return
+
+    encrypted_location = crypto.encrypt(normalized_city)
 
     if await db.update_user_field(message.from_user.id, city=encrypted_location):
-        await message.answer(f"✅ Местоположение изменено на {message.text}!")
+        await message.answer(f"✅ Местоположение изменено на {normalized_city}!")
     else:
         await message.answer("❌ Ошибка при обновлении местоположения")
 

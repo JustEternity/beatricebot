@@ -1,6 +1,7 @@
 import sys
 import asyncio
 import logging
+import signal
 from aiogram import Bot, Dispatcher
 from bot.config import load_config
 from bot.handlers import routers
@@ -43,10 +44,13 @@ async def main():
         logger.info("Bot starting...")
         await dp.start_polling(bot)
 
-    except Exception as e:
-        logger.exception("Critical error")
+        await dp.start_polling(bot)
     finally:
-        logger.info("Bot stopped")
+        await bot.session.close()
+        logger.info("Bot stopped gracefully")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")

@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 from bot.handlers.common import show_main_menu
 from bot.models.states import RegistrationStates
+from bot.services.city_validator import city_validator
 from bot.services.database import Database
 from bot.services.encryption import CryptoService
 from bot.services.utils import delete_previous_messages
@@ -77,9 +78,25 @@ async def gender_handler(message: Message, state: FSMContext):
 
 @router.message(RegistrationStates.LOCATION)
 async def location_handler(message: Message, state: FSMContext, crypto: CryptoService):
-    await state.update_data(location=crypto.encrypt(message.text))
+    is_valid, normalized_city = city_validator.validate_city(message.text)
+
+    if not is_valid:
+        await message.answer("⚠️ Город не найден. Пожалуйста, введите существующий российский город")
+        return
+
+    await state.update_data(location=crypto.encrypt(normalized_city))
     await message.answer("📸 Отправьте 1-3 фотографии")
     await state.set_state(RegistrationStates.PHOTOS)
+
+@router.message(RegistrationStates.PHOTOS, F.photo | F.text)
+async def photos_handler(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+
+    if message.photo:
+        if len(photos) >= 3:
+            await message.answer("⚠️ Максимум 3 фотографии")
+            return
 
 @router.message(RegistrationStates.PHOTOS, F.photo | F.text)
 async def photos_handler(message: Message, state: FSMContext):

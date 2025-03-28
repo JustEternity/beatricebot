@@ -1,13 +1,8 @@
 .env
-test.py
 .gitignore
-bot/__pycache__
-bot/handlers/__pycache__
-bot/keyboards/__pycache__
-bot/services/__pycache__
-bot/models/__pycache__
-bot/texts/__pycache__
-venv
-beatricebot.code-workspace
 bot.log
-config.py
+requirements.txt
+BEATRICE
+# PyCharm/IntelliJ
+.idea/
+*.iml

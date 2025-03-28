@@ -129,6 +129,8 @@ async def show_compatible_user(message: Message, state: FSMContext, db: Database
         # Форматируем текст профиля
         profile_text = await format_profile_text(user_data, crypto)
         
+        logger.debug(f"User gender in profile: {user_data.get('gender')}, type: {type(user_data.get('gender'))}")
+
         # Добавляем информацию о совместимости
         profile_text += f"<b>Совместимость:</b> {compatibility}%"
         
