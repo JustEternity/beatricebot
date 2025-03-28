@@ -10,6 +10,7 @@ from bot.services.encryption import CryptoService
 from bot.middlewares.basic import DependencyInjectionMiddleware
 from bot.services.s3storage import S3Service
 
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
