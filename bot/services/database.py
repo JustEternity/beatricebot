@@ -1,6 +1,6 @@
 import asyncpg
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta 
 from typing import List, Optional, Dict, Union, Tuple
 from bot.models.user import UserDB
 from bot.services.utils import standardize_gender
@@ -51,11 +51,11 @@ class Database:
                 return False
 
     async def save_user(self, telegram_id: int, user_data: Dict) -> bool:
-        """Сохранение нового пользователя с фотографиями из S3"""
+        """Сохранение нового пользователя"""
         logger.info(f"Saving user {telegram_id}")
         try:
             async with self.pool.acquire() as conn:
-                # Логируем базовую информацию (без фотографий для безопасности)
+                # Логируем базовую информацию о пользователе
                 logger.debug(f"User data: { {k: v for k, v in user_data.items() if k != 'photos'} }")
                 logger.debug(f"Photos count: {len(user_data['photos'])}")
 
@@ -85,17 +85,13 @@ class Database:
                     standardized_gender, user_data['location'],
                     user_data['description'], datetime.now(), datetime.now())
 
-                # Сохранение фотографий с ссылками на S3
-                for index, photo_data in enumerate(user_data['photos'], start=1):
+                # Сохранение фотографий
+                for index, photo_id in enumerate(user_data['photos']):
                     await conn.execute("""
                         INSERT INTO photos
-                        (usertelegramid, photourl, photofileid, photodisplayorder)
-                        VALUES ($1, $2, $3, $4)
-                    """,
-                    telegram_id,
-                    photo_data['s3_url'],   # URL фото
-                    photo_data['file_id'],  # Telegram file ID
-                    index)                  # Порядковый номер фото
+                        (usertelegramid, photofileid, photodisplayorder)
+                        VALUES ($1, $2, $3)
+                    """, telegram_id, photo_id, index + 1)
 
                 logger.info(f"✅ User {telegram_id} saved successfully")
                 return True
@@ -119,10 +115,9 @@ class Database:
                     telegram_id
                 )
 
-                if user:
-                    logger.debug(f"Found user {telegram_id} with {len(photos)} photos")
-                else:
-                    logger.debug(f"User {telegram_id} not found")
+                if not user:
+                    logger.warning(f"User {telegram_id} not found in database")
+                    return None
 
                 return {
                     'name': user['name'],
@@ -130,11 +125,10 @@ class Database:
                     'gender': user['gender'],
                     'location': user['city'],
                     'description': user['profiledescription'],
-                    'photos': [p['photofileid'] for p in photos]
-                } if user else None
+                    'photos': [p['photofileid'] for p in photos] if photos else []
+                }
             except Exception as e:
-                logger.error(f"Error getting data for user {telegram_id}")
-                logger.exception(e)
+                logger.error(f"Error getting data for user {telegram_id}: {e}")
                 return None
 
     async def update_user_field(self, telegram_id: int, **fields) -> bool:
@@ -230,13 +224,13 @@ class Database:
     async def save_user_answers(self, telegram_id: int, answers: Dict[int, int]) -> bool:
         """Сохранение результатов теста"""
         logger.info(f"Saving test answers for user {telegram_id}")
-
+        
         # Проверяем, существует ли пользователь
         user_exists = await self.is_user_registered(telegram_id)
         if not user_exists:
             logger.error(f"Cannot save answers: User {telegram_id} is not registered")
             return False
-
+        
         async with self.pool.acquire() as conn:
             try:
                 # Удаляем предыдущие ответы
@@ -317,54 +311,54 @@ class Database:
                     "SELECT questionid, answerid FROM useranswers WHERE usertelegramid = $1",
                     user_id
                 )
-
+                
                 answers = {row['questionid']: row['answerid'] for row in rows}
                 logger.debug(f"Found {len(answers)} answers for user {user_id}")
                 return answers
             except Exception as e:
                 logger.error(f"Error getting answers for user {user_id}: {e}")
                 return {}
-
+    
     async def get_answer_weights(self):
         """Получает веса ответов для вопросов (использует веса по умолчанию)"""
         try:
             # Получаем все ID вопросов
             query = "SELECT questionid FROM questions"
             result = await self.execute_query(query)
-
+            
             # Создаем словарь с весами по умолчанию (1.0) для всех вопросов
             weights = {row[0]: 1.0 for row in result} if result else {}
-
+            
             logger.debug(f"Using default weights for {len(weights)} questions")
             return weights
         except Exception as e:
             logger.error(f"Error getting question IDs: {e}")
             return {}
-
+    
     async def get_users_with_answers(self, exclude_user_id: int = None) -> List[int]:
         """Получение списка пользователей, прошедших тест"""
         logger.debug(f"Fetching users with test answers (excluding {exclude_user_id})")
         async with self.pool.acquire() as conn:
             try:
                 query = """
-                    SELECT DISTINCT usertelegramid
-                    FROM useranswers
+                    SELECT DISTINCT usertelegramid 
+                    FROM useranswers 
                 """
-
+                
                 params = []
                 if exclude_user_id is not None:
                     query += " WHERE usertelegramid != $1"
                     params.append(exclude_user_id)
-
+                
                 rows = await conn.fetch(query, *params)
-
+                
                 user_ids = [row['usertelegramid'] for row in rows]
                 logger.debug(f"Found {len(user_ids)} users with answers")
                 return user_ids
             except Exception as e:
                 logger.error(f"Error getting users with answers: {e}")
                 return []
-
+                
     async def check_user_has_test(self, user_id: int) -> bool:
         """Проверяет, прошел ли пользователь тест совместимости"""
         logger.debug(f"Checking if user {user_id} has completed the test")
@@ -388,17 +382,17 @@ class Database:
             if not user_answers:
                 logger.warning(f"User {user_id} has no answers")
                 return []
-
+            
             # Получаем пользователей, прошедших тест
             other_users = await self.get_users_with_answers(exclude_user_id=user_id)
             logger.debug(f"Found {len(other_users)} other users with answers")
             if not other_users:
                 logger.warning("No other users with answers found")
                 return []
-
+            
             # Получаем веса ответов
             weights = await self.get_answer_weights()
-
+            
             # Рассчитываем совместимость с каждым пользователем
             compatible_users = []
             for other_id in other_users:
@@ -407,20 +401,20 @@ class Database:
                 if not other_answers:
                     logger.warning(f"User {other_id} has no answers")
                     continue
-
+                
                 # Рассчитываем совместимость
                 compatibility = self._calculate_compatibility(user_answers, other_answers, weights)
-
+                
                 # Добавляем пользователя в список, если совместимость выше порога
                 if compatibility > 30:  # Минимальный порог совместимости
                     compatible_users.append((other_id, compatibility))
-
+            
             # Сортируем по совместимости (от высокой к низкой)
             compatible_users.sort(key=lambda x: x[1], reverse=True)
-
+            
             # Возвращаем ограниченное количество пользователей
             return compatible_users[:limit]
-
+        
         except Exception as e:
             logger.error(f"Error finding compatible users: {e}")
             logger.exception(e)
@@ -432,13 +426,13 @@ class Database:
             total_questions = len(set(user1_answers.keys()) & set(user2_answers.keys()))
             if total_questions == 0:
                 return 0.0
-
+            
             compatibility_score = 0.0
-
+            
             for question_id in set(user1_answers.keys()) & set(user2_answers.keys()):
                 answer1 = user1_answers[question_id]
                 answer2 = user2_answers[question_id]
-
+                
                 # Если ответы совпадают, добавляем полный вес
                 if answer1 == answer2:
                     weight = weights.get(question_id, {}).get(answer1, 1.0)
@@ -447,33 +441,31 @@ class Database:
                     # Если ответы разные, можно добавить частичную совместимость
                     # в зависимости от близости ответов или других факторов
                     pass
-
+            
             # Рассчитываем процент совместимости
             compatibility_percent = (compatibility_score / total_questions) * 100
             return compatibility_percent
-
+        
         except Exception as e:
             logger.error(f"Error calculating compatibility: {e}")
             return 0.0
 
     async def get_user_profile(self, user_id: int) -> Optional[Dict]:
-        """Получает профиль пользователя для отображения"""
-        logger.debug(f"Getting profile for user {user_id}")
-        async with self.pool.acquire() as conn:
-            try:
-                user = await conn.fetchrow(
-                    "SELECT telegramid, name, age, gender, city as location, profiledescription as description FROM users WHERE telegramid = $1",
-                    user_id
-                )
-
-                if not user:
-                    logger.warning(f"User {user_id} not found")
-                    return None
-
-                return dict(user)
-            except Exception as e:
-                logger.error(f"Error getting profile for user {user_id}: {e}")
+        """Получает профиль пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                    SELECT telegramid, name, age, gender, city, profiledescription
+                    FROM users
+                    WHERE telegramid = $1
+                """
+                result = await conn.fetchrow(query, user_id)
+                if result:
+                    return dict(result)
                 return None
+        except Exception as e:
+            logger.error(f"Error getting user profile for {user_id}: {e}")
+            return None
 
     async def get_user_photos(self, user_id: int) -> List[str]:
         """Получает список ID фотографий пользователя"""
@@ -484,60 +476,187 @@ class Database:
                     "SELECT photofileid FROM photos WHERE usertelegramid = $1 ORDER BY photodisplayorder",
                     user_id
                 )
-
+                
                 return [row['photofileid'] for row in rows]
             except Exception as e:
                 logger.error(f"Error getting photos for user {user_id}: {e}")
                 return []
 
-    async def add_like(self, user_id: int, liked_user_id: int) -> bool:
-        """Добавляет лайк от пользователя к другому пользователю"""
-        logger.info(f"User {user_id} likes user {liked_user_id}")
-        async with self.pool.acquire() as conn:
-            try:
-                # Проверяем, существует ли уже такой лайк
-                existing = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM likes WHERE user_id = $1 AND liked_user_id = $2)",
-                    user_id, liked_user_id
-                )
-
-                if existing:
-                    logger.debug(f"Like from {user_id} to {liked_user_id} already exists")
-                    return True
-
-                # Добавляем новый лайк
+    async def add_like(self, from_user_id: int, to_user_id: int) -> bool:
+        """Добавляет лайк от одного пользователя к другому"""
+        logger.info(f"User {from_user_id} likes user {to_user_id}")
+        try:
+            async with self.pool.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO likes (user_id, liked_user_id, created_at) VALUES ($1, $2, $3)",
-                    user_id, liked_user_id, datetime.now()
+                    """
+                    INSERT INTO likes (from_user_telegram_id, to_user_telegram_id, created_at) 
+                    VALUES ($1, $2, NOW())
+                    ON CONFLICT (from_user_telegram_id, to_user_telegram_id) 
+                    DO NOTHING
+                    """,
+                    from_user_id, to_user_id
                 )
-
-                logger.info(f"Added like from {user_id} to {liked_user_id}")
                 return True
-            except Exception as e:
-                logger.error(f"Error adding like from {user_id} to {liked_user_id}: {e}")
-                return False
+        except Exception as e:
+            logger.error(f"Error adding like from {from_user_id} to {to_user_id}: {e}")
+            # Проверим структуру таблицы
+            try:
+                async with self.pool.acquire() as conn:
+                    table_info = await conn.fetch(
+                        """
+                        SELECT column_name, data_type 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'likes'
+                        """
+                    )
+                    logger.info(f"Структура таблицы likes: {[dict(row) for row in table_info]}")
+            except Exception as table_error:
+                logger.error(f"Ошибка при получении структуры таблицы: {table_error}")
+            return False
 
     async def check_mutual_like(self, user1_id: int, user2_id: int) -> bool:
-        """Проверяет наличие взаимных лайков между пользователями"""
+        """Проверяет, есть ли взаимный лайк между пользователями"""
         logger.debug(f"Checking mutual like between {user1_id} and {user2_id}")
-        async with self.pool.acquire() as conn:
-            try:
-                # Проверяем лайк от user1 к user2
+        try:
+            async with self.pool.acquire() as conn:
+                # Проверяем, лайкнул ли user1 пользователя user2
                 like1 = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM likes WHERE user_id = $1 AND liked_user_id = $2)",
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM likes 
+                        WHERE from_user_telegram_id = $1 AND to_user_telegram_id = $2
+                    )
+                    """,
                     user1_id, user2_id
                 )
-
-                # Проверяем лайк от user2 к user1
+                
+                # Проверяем, лайкнул ли user2 пользователя user1
                 like2 = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM likes WHERE user_id = $1 AND liked_user_id = $2)",
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM likes 
+                        WHERE from_user_telegram_id = $1 AND to_user_telegram_id = $2
+                    )
+                    """,
                     user2_id, user1_id
                 )
+                
+                # Взаимный лайк есть, если оба пользователя лайкнули друг друга
+                return like1 and like2
+        except Exception as e:
+            logger.error(f"Error checking mutual like between {user1_id} and {user2_id}: {e}")
+            return False
 
-                # Взаимный лайк, если оба лайка существуют
-                is_mutual = like1 and like2
-                logger.debug(f"Mutual like between {user1_id} and {user2_id}: {is_mutual}")
-                return is_mutual
-            except Exception as e:
-                logger.error(f"Error checking mutual like between {user1_id} and {user2_id}: {e}")
-                return False
+    async def check_user_subscription(self, user_id: int) -> bool:
+        """Проверяет, есть ли у пользователя активная подписка"""
+        logger.debug(f"Checking subscription for user {user_id}")
+        try:
+            async with self.pool.acquire() as conn:
+                # Проверяем наличие активной подписки
+                result = await conn.fetchrow(
+                    """
+                    SELECT * FROM purchasedservices 
+                    WHERE usertelegramid = $1 
+                    AND serviceid = 1
+                    AND serviceenddate > NOW()
+                    AND paymentstatus = true
+                    ORDER BY serviceenddate DESC
+                    LIMIT 1
+                    """,
+                    user_id
+                )
+                
+                if result:
+                    logger.debug(f"User {user_id} has active subscription until {result['serviceenddate']}")
+                    return True
+                else:
+                    # Проверяем, есть ли вообще записи о подписке
+                    any_records = await conn.fetchrow(
+                        "SELECT COUNT(*) FROM purchasedservices WHERE usertelegramid = $1",
+                        user_id
+                    )
+                    
+                    if any_records and any_records['count'] > 0:
+                        logger.debug(f"User {user_id} has subscription records but none are active")
+                    else:
+                        logger.debug(f"User {user_id} has no subscription records at all")
+                    
+                    return False
+        except Exception as e:
+            logger.error(f"Error checking subscription for user {user_id}: {e}")
+            return False
+
+    async def activate_subscription(self, user_id: int, days: int = 30) -> bool:
+        """Активирует подписку для пользователя на указанное количество дней"""
+        logger.info(f"Начало активации подписки для пользователя {user_id} на {days} дней")
+        
+        try:
+            async with self.pool.acquire() as conn:
+                # Проверяем, есть ли уже активная подписка
+                existing = await conn.fetchrow(
+                    """
+                    SELECT * FROM purchasedservices 
+                    WHERE usertelegramid = $1 
+                    AND serviceid = 1
+                    AND serviceenddate > NOW()
+                    AND paymentstatus = true
+                    """,
+                    user_id
+                )
+                
+                if existing:
+                    logger.info(f"У пользователя {user_id} уже есть активная подписка до {existing['serviceenddate']}")
+                    return True
+                
+                # Создаем новую запись
+                payment_id = int(datetime.now().timestamp() * 1000)
+                end_date = datetime.now() + timedelta(days=days)
+                
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO purchasedservices 
+                        (usertelegramid, serviceid, serviceenddate, paymentstatus, paymentid) 
+                        VALUES ($1, $2, $3, $4, $5)
+                        """,
+                        user_id, 1, end_date, True, payment_id
+                    )
+                    logger.info(f"Подписка для пользователя {user_id} успешно активирована до {end_date}")
+                    
+                    # Проверяем, что запись создана
+                    check = await conn.fetchrow(
+                        """
+                        SELECT * FROM purchasedservices 
+                        WHERE usertelegramid = $1 
+                        AND serviceid = 1
+                        AND paymentstatus = true
+                        ORDER BY serviceenddate DESC
+                        LIMIT 1
+                        """,
+                        user_id
+                    )
+                    
+                    if check:
+                        logger.info(f"Подтверждена активация подписки для {user_id} до {check['serviceenddate']}")
+                        return True
+                    else:
+                        logger.error(f"Не удалось подтвердить активацию подписки для {user_id}")
+                        return False
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка SQL при активации подписки: {e}")
+                    # Проверим структуру таблицы
+                    table_info = await conn.fetch(
+                        """
+                        SELECT column_name, data_type 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'purchasedservices'
+                        """
+                    )
+                    logger.info(f"Структура таблицы purchasedservices: {[dict(row) for row in table_info]}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"❌ Ошибка активации подписки: {e}")
+            logger.exception(e)
+            return False

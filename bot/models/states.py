@@ -18,6 +18,12 @@ class RegistrationStates(StatesGroup):
     EDIT_PHOTOS = State()      # Редактирование фотографий
     EDIT_DESCRIPTION = State() # Редактирование описания
 
+    SET_FILTER_CITY = State()
+    SET_FILTER_AGE = State()
+    SET_FILTER_GENDER = State()
+    SET_FILTER_OCCUPATION = State()
+    SET_FILTER_GOALS = State()
+
     VIEW_PROFILE = State()     # Просмотр профиля
 
     # Состояния тестирования

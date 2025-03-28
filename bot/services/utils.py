@@ -51,21 +51,34 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
         else:
             # Расшифровываем данные
             decrypted_data = user_data.copy()
-            encrypted_fields = ['name', 'about', 'interests', 'city']
+            
+            # Определяем поля, которые могут быть зашифрованы
+            encrypted_fields = ['name', 'about', 'interests', 'city', 'location', 'description']
+            
             for field in encrypted_fields:
                 if field in user_data and user_data[field] is not None:
                     try:
-                        decrypted_data[field] = crypto.decrypt(user_data[field])
+                        # Проверяем, является ли значение байтами (зашифрованными данными)
+                        if isinstance(user_data[field], bytes):
+                            decrypted_data[field] = crypto.decrypt(user_data[field])
+                        else:
+                            # Если это не байты, используем как есть
+                            decrypted_data[field] = user_data[field]
                     except Exception as e:
                         logger.error(f"Error decrypting field {field}: {e}")
-                        decrypted_data[field] = user_data[field]  # Используем зашифрованные данные
+                        decrypted_data[field] = user_data[field]  # Используем исходные данные
         
         # Форматируем текст профиля
         profile_text = f"👤 <b>{decrypted_data.get('name', 'Без имени')}</b>, {decrypted_data.get('age', '?')} лет\n"
-        profile_text += f"🏙️ {decrypted_data.get('city', 'Город не указан')}\n\n"
         
-        if decrypted_data.get('about'):
-            profile_text += f"<b>О себе:</b>\n{decrypted_data.get('about')}\n\n"
+        # Используем 'location' или 'city' в зависимости от того, что доступно
+        location = decrypted_data.get('location') or decrypted_data.get('city', 'Город не указан')
+        profile_text += f"🏙️ {location}\n\n"
+        
+        # Используем 'description' или 'about' в зависимости от того, что доступно
+        description = decrypted_data.get('description') or decrypted_data.get('about')
+        if description:
+            profile_text += f"<b>О себе:</b>\n{description}\n\n"
         
         if decrypted_data.get('interests'):
             profile_text += f"<b>Интересы:</b>\n{decrypted_data.get('interests')}\n\n"

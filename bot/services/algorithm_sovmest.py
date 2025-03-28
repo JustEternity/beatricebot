@@ -1,193 +1,187 @@
 from typing import List, Tuple, Optional, Dict
 import logging
 
+from bot.services import Database
+
 logger = logging.getLogger(__name__)
 
+
 class CompatibilityService:
-    """Сервис для расчета совместимости между пользователями на основе их ответов на тест"""
-    
-    def __init__(self, db):
+    def __init__(self, db: Database):
         self.db = db
-        self.logger = logging.getLogger(__name__)
-    
-    def calculate_compatibility(self, user_answers: Dict[int, int], other_answers: Dict[int, int], weights: Dict[int, float] = None) -> float:
+
+    async def get_user_answers(self, user_id: int) -> dict:
+        """Получает ответы пользователя на вопросы теста"""
+        query = "SELECT questionid, answerid FROM useranswers WHERE usertelegramid = $1"
+        records = await self.db.pool.fetch(query, user_id)
+        return {r['questionid']: r['answerid'] for r in records}
+
+    async def get_all_users_with_answers(self, exclude_user_id: int) -> list:
+        """Получает всех пользователей с ответами, кроме указанного"""
+        query = """
+            SELECT DISTINCT u.telegramid 
+            FROM users u
+            JOIN user_answers ua ON u.telegramid = ua.user_id
+            WHERE u.telegramid != $1
         """
-        Рассчитывает совместимость между двумя пользователями на основе их ответов.
+        return await self.db.pool.fetch(query, exclude_user_id)
+
+    def calculate_compatibility(self, user1_answers: dict, user2_answers: dict) -> float:
+        """Вычисляет процент совместимости"""
+        if not user1_answers or not user2_answers:
+            return 0.0
+
+        total_score = 0
+        max_score = len(user1_answers) * 3
+
+        for q_id, a_id in user1_answers.items():
+            if q_id in user2_answers:
+                if user2_answers[q_id] == a_id:
+                    total_score += 3
+                elif abs(user2_answers[q_id] - a_id) == 1:
+                    total_score += 1
+
+        return (total_score / max_score) * 100 if max_score > 0 else 0
+
+    async def find_compatible_users(
+            self,
+            user_id: int,
+            city: str = None,
+            age_min: int = None,
+            age_max: int = None,
+            gender: str = None,
+            occupation: str = None,
+            goals: str = None,
+            limit: int = 5,
+            min_score: float = 50.0
+    ) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Поиск совместимых пользователей с учетом фильтров
         
         Args:
-            user_answers: Словарь {id_вопроса: ответ} для текущего пользователя
-            other_answers: Словарь {id_вопроса: ответ} для другого пользователя
-            weights: Словарь {id_вопроса: вес} для вопросов (опционально)
-        
-        Returns:
-            Процент совместимости (0-100)
-        """
-        if not user_answers or not other_answers:
-            return 0.0
-        
-        # Если веса не предоставлены, используем равные веса для всех вопросов
-        if weights is None:
-            weights = {}
-        
-        total_score = 0.0
-        max_possible_score = 0.0
-        
-        # Находим общие вопросы, на которые ответили оба пользователя
-        common_questions = set(user_answers.keys()) & set(other_answers.keys())
-        
-        if not common_questions:
-            return 0.0
-        
-        for question_id in common_questions:
-            # Получаем ответы обоих пользователей
-            user_answer = user_answers[question_id]
-            other_answer = other_answers[question_id]
-            
-            # Получаем вес вопроса (по умолчанию 1.0)
-            weight = weights.get(question_id, 1.0)
-            
-            # Рассчитываем совпадение ответов (0-5)
-            # Чем меньше разница, тем выше совпадение
-            answer_diff = abs(user_answer - other_answer)
-            match_score = 5 - min(answer_diff, 5)  # Максимальная разница 5
-            
-            # Добавляем взвешенный балл
-            total_score += match_score * weight
-            max_possible_score += 5 * weight  # Максимально возможный балл
-        
-        # Рассчитываем процент совместимости
-        if max_possible_score > 0:
-            compatibility = (total_score / max_possible_score) * 100
-        else:
-            compatibility = 0.0
-        
-        return compatibility
-    
-    async def _apply_preference_factors(self, user1_id: int, user2_id: int, base_compatibility: float) -> float:
-        """
-        Применяет дополнительные факторы к базовой совместимости
-        
-        Args:
-            user1_id: ID первого пользователя
-            user2_id: ID второго пользователя
-            base_compatibility: Базовая совместимость
+            user_id: ID пользователя, для которого ищем совместимость
+            city: Фильтр по городу
+            age_min: Минимальный возраст
+            age_max: Максимальный возраст
+            gender: Фильтр по полу
+            occupation: Фильтр по роду занятий
+            goals: Фильтр по целям знакомства
+            limit: Максимальное количество результатов
+            min_score: Минимальный процент совместимости
             
         Returns:
-            float: Скорректированная совместимость
+            Tuple[List[Dict], List[Dict]]: Два списка пользователей - 
+            с высокой и низкой совместимостью
         """
-        # Получаем данные пользователей
-        user1_data = await self.db.get_user_data(user1_id)
-        user2_data = await self.db.get_user_data(user2_id)
+        logger.debug(f"Finding compatible users for {user_id}, filters: city={city}, age={age_min}-{age_max}, gender={gender}")
         
-        if not user1_data or not user2_data:
-            return base_compatibility
+        # Получаем ответы текущего пользователя
+        user_answers = await self.get_user_answers(user_id)
+        if not user_answers:
+            logger.debug("User has no answers")
+            return [], []
         
-        # Проверяем соответствие предпочтений по возрасту, полу и т.д.
-        # Это упрощенная логика, можно расширить
+        # Получаем профиль текущего пользователя для определения пола и предпочтений
+        current_user_profile = await self.db.get_user_profile(user_id)
+        if not current_user_profile:
+            logger.debug("Could not get current user profile")
+            return [], []
         
-        # Проверка пола
-        if user1_data.get('gender_preference') and user2_data.get('gender'):
-            if user1_data['gender_preference'] != user2_data['gender']:
-                return 0.0  # Несоответствие предпочтений по полу
+        # Определяем пол текущего пользователя и его предпочтения
+        current_user_gender = current_user_profile.get('gender')
         
-        # Проверка возраста
-        if user1_data.get('age_min') and user1_data.get('age_max') and user2_data.get('age'):
-            if user2_data['age'] < user1_data['age_min'] or user2_data['age'] > user1_data['age_max']:
-                return base_compatibility * 0.7  # Снижаем совместимость при несоответствии возраста
+        # Строим базовый запрос для получения пользователей
+        query = """
+            SELECT u.telegramid, u.name, u.age, u.gender, u.city as location, 
+                u.profiledescription as description
+            FROM users u
+            JOIN useranswers ua ON u.telegramid = ua.usertelegramid
+            WHERE u.telegramid != $1
+        """
+        params = [user_id]
+        param_index = 2
         
-        # Можно добавить другие факторы
+        # Добавляем фильтр по полу - показываем только противоположный пол
+        # Если текущий пользователь мужчина (gender = '0'), показываем женщин (gender = '1')
+        # Если текущий пользователь женщина (gender = '1'), показываем мужчин (gender = '0')
+        if current_user_gender == '0':  # Мужчина ищет женщин
+            query += f" AND u.gender = '1'"
+        elif current_user_gender == '1':  # Женщина ищет мужчин
+            query += f" AND u.gender = '0'"
         
-        return base_compatibility
-    
-    async def find_compatible_users(self, user_id: int, limit: int = 20, min_score: float = 50.0) -> Tuple[List[Tuple[int, float]], List[Tuple[int, float]]]:
-        """Находит совместимых пользователей с учетом пола"""
-        logger.debug(f"Finding compatible users for user {user_id}")
+        # Добавляем фильтры в запрос
+        if city:
+            query += f" AND u.city = ${param_index}"
+            params.append(city)
+            param_index += 1
+        
+        if age_min is not None and age_max is not None:
+            query += f" AND u.age BETWEEN ${param_index} AND ${param_index + 1}"
+            params.extend([age_min, age_max])
+            param_index += 2
+        
+        # Если указан дополнительный фильтр по полу, применяем его
+        if gender is not None:
+            query += f" AND u.gender = ${param_index}"
+            params.append(gender)
+            param_index += 1
+        
+        if occupation is not None:
+            query += f" AND u.occupation = ${param_index}"
+            params.append(occupation)
+            param_index += 1
+        
+        if goals is not None:
+            query += f" AND u.goals = ${param_index}"
+            params.append(goals)
+            param_index += 1
+        
+        # Добавляем группировку по пользователю
+        query += " GROUP BY u.telegramid"
+        
+        # Выполняем запрос
         try:
-            # Получаем данные текущего пользователя
-            current_user = await self.db.get_user(user_id)
-            if not current_user:
-                logger.warning(f"User {user_id} not found")
+            candidates = await self.db.pool.fetch(query, *params)
+            logger.debug(f"Found {len(candidates)} candidates matching filters")
+            
+            if not candidates:
                 return [], []
             
-            # Получаем пол и предпочтения текущего пользователя
-            user_gender = current_user.get('gender')
-            looking_for = current_user.get('looking_for')
-            
-            logger.debug(f"User {user_id} gender: {user_gender}, looking for: {looking_for}")
-            
-            # Получаем ответы текущего пользователя
-            user_answers = await self.db.get_user_answers(user_id)
-            if not user_answers:
-                logger.warning(f"User {user_id} has no answers")
-                return [], []
-            
-            # Получаем пользователей, прошедших тест
-            other_users = await self.db.get_users_with_answers(exclude_user_id=user_id)
-            logger.debug(f"Found {len(other_users)} other users with answers")
-            
-            # Получаем веса ответов
-            try:
-                weights = await self.db.get_answer_weights()
-            except Exception as e:
-                logger.warning(f"Error getting answer weights: {e}. Using default weights.")
-                weights = {}  # Используем пустой словарь, если не удалось получить веса
-            
-            # Рассчитываем совместимость с каждым пользователем
+            # Вычисляем совместимость для каждого кандидата
             high_compatible = []
             low_compatible = []
             
-            for other_id in other_users:
-                # Получаем данные другого пользователя
-                other_user = await self.db.get_user(other_id)
-                if not other_user:
+            for candidate in candidates:
+                # Получаем ответы кандидата
+                candidate_answers = await self.get_user_answers(candidate['telegramid'])
+                if not candidate_answers:
                     continue
                 
-                # Получаем пол другого пользователя
-                other_gender = other_user.get('gender')
+                # Вычисляем совместимость
+                compatibility = self.calculate_compatibility(user_answers, candidate_answers)
                 
-                # Проверяем соответствие по полу
-                # Если looking_for не установлен, используем противоположный пол по умолчанию
-                if looking_for is None:
-                    # Если пол пользователя 0 (мужской), то ищем 1 (женский) и наоборот
-                    if user_gender == '0' or user_gender == 0:
-                        effective_looking_for = '1'
-                    else:
-                        effective_looking_for = '0'
-                    logger.debug(f"Looking_for not set, using default: {effective_looking_for}")
-                else:
-                    effective_looking_for = looking_for
+                # Получаем фотографии пользователя
+                photos = await self.db.get_user_photos(candidate['telegramid'])
                 
-                # Преобразуем к строкам для сравнения
-                if isinstance(effective_looking_for, (int, float)):
-                    effective_looking_for = str(effective_looking_for)
-                if isinstance(other_gender, (int, float)):
-                    other_gender = str(other_gender)
+                # Создаем полный профиль пользователя
+                user_profile = dict(candidate)
+                user_profile['photos'] = photos
                 
-                # Проверяем соответствие
-                if effective_looking_for == '0' and other_gender != '0':  # Ищет мужчин, но другой пользователь не мужчина
-                    logger.debug(f"Skipping user {other_id} - gender mismatch (looking for men)")
-                    continue
-                if effective_looking_for == '1' and other_gender != '1':  # Ищет женщин, но другой пользователь не женщина
-                    logger.debug(f"Skipping user {other_id} - gender mismatch (looking for women)")
-                    continue
+                # Создаем результат с профилем и совместимостью
+                result = {
+                    'profile': user_profile,
+                    'compatibility': round(compatibility, 1)
+                }
                 
-                # Получаем ответы другого пользователя
-                other_answers = await self.db.get_user_answers(other_id)
-                if not other_answers:
-                    continue
-                
-                # Рассчитываем совместимость
-                compatibility = self.calculate_compatibility(user_answers, other_answers, weights)
-                
-                # Добавляем пользователя в соответствующий список
+                # Распределяем по категориям совместимости
                 if compatibility >= min_score:
-                    high_compatible.append((other_id, compatibility))
-                elif compatibility > 30:  # Минимальный порог для низкой совместимости
-                    low_compatible.append((other_id, compatibility))
+                    high_compatible.append(result)
+                else:
+                    low_compatible.append(result)
             
-            # Сортируем списки по совместимости (от высокой к низкой)
-            high_compatible.sort(key=lambda x: x[1], reverse=True)
-            low_compatible.sort(key=lambda x: x[1], reverse=True)
+            # Сортируем по совместимости (от высокой к низкой)
+            high_compatible.sort(key=lambda x: x['compatibility'], reverse=True)
+            low_compatible.sort(key=lambda x: x['compatibility'], reverse=True)
             
             # Ограничиваем количество результатов
             return high_compatible[:limit], low_compatible[:limit]
@@ -196,7 +190,8 @@ class CompatibilityService:
             logger.error(f"Error finding compatible users: {e}")
             logger.exception(e)
             return [], []
-    
+
+        
     async def get_compatibility_explanation(self, user1_id: int, user2_id: int) -> str:
         """
         Генерирует объяснение совместимости между пользователями

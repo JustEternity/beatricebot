@@ -21,7 +21,8 @@ def main_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="👤 Моя анкета", callback_data="view_profile")],
             [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")],
-            [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")]
+            [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")],
+            [InlineKeyboardButton(text="💎 Подписка", callback_data="subscription_info")]
         ]
     )
 
@@ -100,3 +101,12 @@ def compatible_navigation_keyboard(user_id: int = None) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def subscription_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для активации подписки"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Активировать подписку", callback_data="activate_subscription")],
+            [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")]
+        ]
+    )
