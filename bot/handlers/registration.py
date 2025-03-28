@@ -13,7 +13,7 @@ from bot.services.encryption import CryptoService
 from bot.services.utils import delete_previous_messages
 from bot.keyboards.menus import policy_keyboard
 from bot.texts.textforbot import POLICY_TEXT
-# from bot.services.s3storage import S3Service
+from bot.services.s3storage import S3Service
 
 from io import BytesIO
 import logging
@@ -87,16 +87,6 @@ async def location_handler(message: Message, state: FSMContext, crypto: CryptoSe
     await state.update_data(location=crypto.encrypt(normalized_city))
     await message.answer("📸 Отправьте 1-3 фотографии")
     await state.set_state(RegistrationStates.PHOTOS)
-
-@router.message(RegistrationStates.PHOTOS, F.photo | F.text)
-async def photos_handler(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-
-    if message.photo:
-        if len(photos) >= 3:
-            await message.answer("⚠️ Максимум 3 фотографии")
-            return
 
 @router.message(RegistrationStates.PHOTOS, F.photo | F.text)
 async def photos_handler(message: Message, state: FSMContext):
