@@ -89,30 +89,64 @@ async def location_handler(message: Message, state: FSMContext, crypto: CryptoSe
     await state.set_state(RegistrationStates.PHOTOS)
 
 @router.message(RegistrationStates.PHOTOS, F.photo | F.text)
-async def photos_handler(message: Message, state: FSMContext):
+async def photos_handler(
+    message: Message,
+    state: FSMContext,
+    s3: S3Service,  # Инжектим сервис S3
+    bot: Bot  # Инжектим бот для скачивания файлов
+):
     data = await state.get_data()
-    photos = data.get("photos", [])
+    photos = data.get("photos", [])  # Теперь это список словарей
 
     if message.photo:
         if len(photos) >= 3:
             await message.answer("⚠️ Максимум 3 фотографии")
             return
 
-        photos.append(message.photo[-1].file_id)
-        await state.update_data(photos=photos)
+        try:
+            # Получаем информацию о файле
+            file_id = message.photo[-1].file_id
+            file = await bot.get_file(file_id)
 
-        builder = ReplyKeyboardBuilder()
-        builder.add(KeyboardButton(text="📷 Добавить еще"))
-        builder.add(KeyboardButton(text="✅ Продолжить"))
+            # Скачиваем файл
+            file_data = BytesIO()
+            await bot.download_file(file.file_path, file_data)
+            file_data.seek(0)
 
-        await message.answer(
-            f"✅ Добавлено {len(photos)}/3 фото",
-            reply_markup=builder.as_markup(resize_keyboard=True)
-        )
+            # Загружаем в S3
+            s3_url = await s3.upload_photo(file_data, message.from_user.id)
+
+            if not s3_url:
+                await message.answer("⚠️ Ошибка загрузки фото. Попробуйте еще раз")
+                return
+
+            # Сохраняем оба идентификатора
+            photos.append({
+                "file_id": file_id,
+                "s3_url": s3_url
+            })
+
+            await state.update_data(photos=photos)
+
+            builder = ReplyKeyboardBuilder()
+            builder.add(KeyboardButton(text="📷 Добавить еще"))
+            if len(photos) < 3:
+                builder.add(KeyboardButton(text="✅ Продолжить"))
+
+            await message.answer(
+                f"✅ Добавлено {len(photos)}/3 фото",
+                reply_markup=builder.as_markup(resize_keyboard=True)
+            )
+
+        except Exception as e:
+            logger.error(f"Photo upload error: {str(e)}")
+            await message.answer("⚠️ Ошибка при обработке фото. Попробуйте еще раз")
+
     elif message.text == "✅ Продолжить":
         if not photos:
             await message.answer("⚠️ Нужно добавить хотя бы 1 фото")
         else:
+            await state.update_data(photos=photos)
             await message.answer("✏️ Напишите описание вашего профиля:", reply_markup=ReplyKeyboardRemove())
             await state.set_state(RegistrationStates.DESCRIPTION)
 

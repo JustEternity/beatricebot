@@ -1,8 +1,7 @@
 .env
 .gitignore
 bot.log
-requirements.txt
-BEATRICE
-# PyCharm/IntelliJ
-.idea/
-*.iml
+config.py
+regfirst.py
+botenv
+uploads
