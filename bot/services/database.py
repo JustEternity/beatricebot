@@ -86,7 +86,12 @@ class Database:
                     user_data['description'], datetime.now(), datetime.now())
 
                 # Сохранение фотографий
-                for index, photo_id in enumerate(user_data['photos']):
+                for index, photo_info in enumerate(user_data['photos']):
+                    # Извлекаем file_id из словаря с информацией о фото
+                    photo_id = photo_info['file_id'] if isinstance(photo_info, dict) else photo_info
+                    logger.debug(f"Processing photo {index + 1}: {photo_info}")
+                    logger.debug(f"Extracted file_id: {photo_id}")
+                    
                     await conn.execute("""
                         INSERT INTO photos
                         (usertelegramid, photofileid, photodisplayorder)
@@ -553,34 +558,24 @@ class Database:
         try:
             async with self.pool.acquire() as conn:
                 # Проверяем наличие активной подписки
-                result = await conn.fetchrow(
+                result = await conn.fetchval(
                     """
-                    SELECT * FROM purchasedservices 
-                    WHERE usertelegramid = $1 
-                    AND serviceid = 1
-                    AND serviceenddate > NOW()
-                    AND paymentstatus = true
-                    ORDER BY serviceenddate DESC
-                    LIMIT 1
+                    SELECT EXISTS(
+                        SELECT 1 FROM purchasedservices 
+                        WHERE usertelegramid = $1 
+                        AND serviceid = 1
+                        AND serviceenddate > NOW()
+                        AND paymentstatus = true
+                    )
                     """,
                     user_id
                 )
                 
                 if result:
-                    logger.debug(f"User {user_id} has active subscription until {result['serviceenddate']}")
+                    logger.debug(f"User {user_id} has active subscription")
                     return True
                 else:
-                    # Проверяем, есть ли вообще записи о подписке
-                    any_records = await conn.fetchrow(
-                        "SELECT COUNT(*) FROM purchasedservices WHERE usertelegramid = $1",
-                        user_id
-                    )
-                    
-                    if any_records and any_records['count'] > 0:
-                        logger.debug(f"User {user_id} has subscription records but none are active")
-                    else:
-                        logger.debug(f"User {user_id} has no subscription records at all")
-                    
+                    logger.debug(f"User {user_id} has no active subscription")
                     return False
         except Exception as e:
             logger.error(f"Error checking subscription for user {user_id}: {e}")
@@ -588,31 +583,52 @@ class Database:
 
     async def activate_subscription(self, user_id: int, days: int = 30) -> bool:
         """Активирует подписку для пользователя на указанное количество дней"""
-        logger.info(f"Начало активации подписки для пользователя {user_id} на {days} дней")
+        logger.info(f"Активация подписки для пользователя {user_id} на {days} дней")
         
         try:
             async with self.pool.acquire() as conn:
                 # Проверяем, есть ли уже активная подписка
-                existing = await conn.fetchrow(
-                    """
-                    SELECT * FROM purchasedservices 
-                    WHERE usertelegramid = $1 
-                    AND serviceid = 1
-                    AND serviceenddate > NOW()
-                    AND paymentstatus = true
-                    """,
-                    user_id
-                )
+                has_active = await self.check_user_subscription(user_id)
                 
-                if existing:
-                    logger.info(f"У пользователя {user_id} уже есть активная подписка до {existing['serviceenddate']}")
+                if has_active:
+                    logger.info(f"У пользователя {user_id} уже есть активная подписка")
                     return True
                 
                 # Создаем новую запись
                 payment_id = int(datetime.now().timestamp() * 1000)
                 end_date = datetime.now() + timedelta(days=days)
                 
+                # Добавляем отладочный вывод
+                logger.debug(f"Добавление записи: user_id={user_id}, service_id=1, end_date={end_date}, payment_id={payment_id}")
+                
                 try:
+                    # Проверяем существование таблицы
+                    table_exists = await conn.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_name = 'purchasedservices'
+                        )
+                        """
+                    )
+                    
+                    if not table_exists:
+                        logger.error("Таблица purchasedservices не существует!")
+                        # Создаем таблицу, если её нет
+                        await conn.execute("""
+                            CREATE TABLE purchasedservices (
+                                id SERIAL PRIMARY KEY,
+                                usertelegramid BIGINT NOT NULL,
+                                serviceid INTEGER NOT NULL,
+                                serviceenddate TIMESTAMP NOT NULL,
+                                paymentstatus BOOLEAN DEFAULT FALSE,
+                                paymentid BIGINT,
+                                created_at TIMESTAMP DEFAULT NOW()
+                            )
+                        """)
+                        logger.info("Таблица purchasedservices создана")
+                    
+                    # Вставляем запись о подписке
                     await conn.execute(
                         """
                         INSERT INTO purchasedservices 
@@ -621,39 +637,41 @@ class Database:
                         """,
                         user_id, 1, end_date, True, payment_id
                     )
-                    logger.info(f"Подписка для пользователя {user_id} успешно активирована до {end_date}")
                     
-                    # Проверяем, что запись создана
-                    check = await conn.fetchrow(
+                    # Проверяем, что запись добавлена
+                    check = await conn.fetchval(
                         """
-                        SELECT * FROM purchasedservices 
-                        WHERE usertelegramid = $1 
-                        AND serviceid = 1
-                        AND paymentstatus = true
-                        ORDER BY serviceenddate DESC
-                        LIMIT 1
+                        SELECT EXISTS(
+                            SELECT 1 FROM purchasedservices 
+                            WHERE usertelegramid = $1 
+                            AND serviceid = 1
+                            AND paymentstatus = true
+                        )
                         """,
                         user_id
                     )
                     
                     if check:
-                        logger.info(f"Подтверждена активация подписки для {user_id} до {check['serviceenddate']}")
+                        logger.info(f"✅ Подписка для пользователя {user_id} успешно активирована до {end_date}")
                         return True
                     else:
-                        logger.error(f"Не удалось подтвердить активацию подписки для {user_id}")
+                        logger.error(f"❌ Запись о подписке не найдена после вставки")
                         return False
                     
                 except Exception as e:
                     logger.error(f"Ошибка SQL при активации подписки: {e}")
-                    # Проверим структуру таблицы
-                    table_info = await conn.fetch(
-                        """
-                        SELECT column_name, data_type 
-                        FROM information_schema.columns 
-                        WHERE table_name = 'purchasedservices'
-                        """
-                    )
-                    logger.info(f"Структура таблицы purchasedservices: {[dict(row) for row in table_info]}")
+                    # Выводим структуру таблицы
+                    try:
+                        table_info = await conn.fetch(
+                            """
+                            SELECT column_name, data_type 
+                            FROM information_schema.columns 
+                            WHERE table_name = 'purchasedservices'
+                            """
+                        )
+                        logger.info(f"Структура таблицы purchasedservices: {[dict(row) for row in table_info]}")
+                    except:
+                        logger.error("Не удалось получить структуру таблицы")
                     return False
                     
         except Exception as e:

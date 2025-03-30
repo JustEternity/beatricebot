@@ -35,9 +35,9 @@ async def activate_subscription_handler(callback: CallbackQuery, db: Database, *
     
     # Проверяем, активировалась ли подписка
     new_status = await db.check_user_subscription(user_id)
-    logger.info(f"Новый статус подписки: {new_status}")
+    logger.info(f"Новый статус подписки после активации: {new_status}")
     
-    if success:
+    if success and new_status:
         await callback.answer("✅ Подписка успешно активирована на 30 дней!", show_alert=True)
         await callback.message.edit_text(
             "💎 Ваша подписка активирована!\n\n"
@@ -46,6 +46,7 @@ async def activate_subscription_handler(callback: CallbackQuery, db: Database, *
         )
     else:
         await callback.answer("❌ Произошла ошибка при активации подписки", show_alert=True)
+        logger.error(f"Не удалось активировать подписку: success={success}, new_status={new_status}")
 
 @router.callback_query(F.data == "subscription_info")
 @handle_errors
