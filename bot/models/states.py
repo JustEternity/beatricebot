@@ -26,6 +26,8 @@ class RegistrationStates(StatesGroup):
 
     VIEW_PROFILE = State()     # Просмотр профиля
 
+    SEND_FEEDBACK = State()    # Отправка обратной связи
+
     # Состояния тестирования
     TEST_IN_PROGRESS = State() # Начало тестирования
     TEST_QUESTION = State()    # Обработка вопросов теста

@@ -636,3 +636,24 @@ class Database:
             logger.error(f"❌ Ошибка активации подписки: {e}")
             logger.exception(e)
             return False
+
+    async def save_feedback(self, user_id: int, text: str) -> bool:
+        try:
+            async with self.pool.acquire() as conn:
+                res = await conn.execute(
+                    "INSERT INTO feedback (sendertelegramid, messagetext) "
+                    "VALUES ($1, $2)",
+                    user_id,
+                    text
+                )
+
+                if res == "INSERT 0 1":
+                    return True
+
+                logger.error(f"Unexpected insert result: {res}")
+                return False
+        except Exception as e:
+            logger.error(f"Feedback save error: {str(e)}")
+            return False
+
+

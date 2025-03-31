@@ -22,7 +22,8 @@ def main_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="👤 Моя анкета", callback_data="view_profile")],
             [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")],
             [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")],
-            [InlineKeyboardButton(text="💎 Подписка", callback_data="subscription_info")]
+            [InlineKeyboardButton(text="💎 Подписка", callback_data="subscription_info")],
+            [InlineKeyboardButton(text="Обратная связь", callback_data="send_feedback")]
         ]
     )
 
@@ -87,7 +88,7 @@ def has_answers_keyboard() -> InlineKeyboardMarkup:
 def compatible_navigation_keyboard(user_id: int = None) -> InlineKeyboardMarkup:
     """Клавиатура для навигации по совместимым пользователям"""
     buttons = []
-    
+
     # Если передан ID пользователя, добавляем кнопки "Пропустить" и "Нравится"
     if user_id:
         buttons.append([
@@ -96,10 +97,10 @@ def compatible_navigation_keyboard(user_id: int = None) -> InlineKeyboardMarkup:
         ])
     else:
         buttons.append([InlineKeyboardButton(text="➡️ Следующий", callback_data="next_compatible")])
-    
+
     # Добавляем кнопку возврата в меню
     buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def subscription_keyboard() -> InlineKeyboardMarkup:
