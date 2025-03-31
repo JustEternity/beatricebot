@@ -1,11 +1,13 @@
 from aiobotocore.session import get_session
 from aiobotocore.config import AioConfig
 from io import BytesIO
+from typing import List, Dict, Optional
 import uuid
 import logging
 import aiofiles
 import os
 from typing import Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -108,3 +110,105 @@ class S3Service:
         except Exception as e:
             logger.error(f"Error processing file for user {user_id}: {str(e)}")
             return None
+
+    async def delete_user_photos(self, user_id: int) -> bool:
+        """
+        Удаляет все файлы пользователя из S3 и локального хранилища
+
+        Args:
+            user_id: Telegram ID пользователя
+
+        Returns:
+            bool: True если удаление успешно, False в случае ошибки
+        """
+        try:
+            # Формируем префикс для S3
+            s3_prefix = f"{user_id}/"
+
+            # Удаление из S3
+            async with self.session.create_client("s3", **self.client_config) as client:
+                # Получаем список всех объектов пользователя
+                list_response = await client.list_objects_v2(
+                    Bucket=self.bucket,
+                    Prefix=s3_prefix
+                )
+
+                if 'Contents' in list_response:
+                    # Формируем список ключей для удаления
+                    objects_to_delete = [
+                        {'Key': obj['Key']}
+                        for obj in list_response['Contents']
+                    ]
+
+                    # Пакетное удаление объектов
+                    await client.delete_objects(
+                        Bucket=self.bucket,
+                        Delete={'Objects': objects_to_delete}
+                    )
+                    logger.info(f"Deleted {len(objects_to_delete)} files from S3 for user {user_id}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error deleting files for user {user_id}: {str(e)}")
+            return False
+
+    async def download_photos_by_urls(self, urls: list[str]) -> list[str]:
+        """
+        Скачивает файлы из S3 по URL и возвращает локальные пути
+        Args:
+            urls: Список полных URL файлов в S3
+
+        Returns:
+            list[str]: Список абсолютных путей к скачанным файлам
+        """
+        local_paths = []
+
+        async with self.session.create_client("s3", **self.client_config) as client:
+            for url in urls:
+                try:
+                    # Парсим URL и извлекаем ключ
+                    parsed = urlparse(url)
+                    key = parsed.path.lstrip('/').replace(f"{self.bucket}/", "", 1)
+
+                    # Формируем локальный путь
+                    local_path = os.path.join(
+                        self.local_storage_path,
+                        key.replace("/", "_")  # user_id/filename.jpg -> user_id_filename.jpg
+                    )
+
+                    # Скачиваем файл
+                    success = await self._download_file(client, key, local_path)
+
+                    if success:
+                        local_paths.append(os.path.abspath(local_path))
+
+                except Exception as e:
+                    logger.error(f"Failed to process {url}: {str(e)}")
+
+        return local_paths
+
+    async def _download_file(self, client, s3_key: str, local_path: str) -> bool:
+        """Скачивает один файл из S3"""
+        try:
+            # Создаем директорию если нужно
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
+            # Скачиваем файл
+            response = await client.get_object(
+                Bucket=self.bucket,
+                Key=s3_key
+            )
+
+            async with response["Body"] as stream:
+                content = await stream.read()
+
+                async with aiofiles.open(local_path, "wb") as f:
+                    await f.write(content)
+
+            logger.info(f"Downloaded {s3_key} -> {local_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Download failed for {s3_key}: {str(e)}")
+            return False

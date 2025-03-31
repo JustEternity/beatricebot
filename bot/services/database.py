@@ -167,30 +167,42 @@ class Database:
                 logger.exception(e)
                 return False
 
-    async def update_user_photos(self, usertelegramid: str, photos: List[str]) -> bool:
-        """Обновление фотографий пользователя"""
+    async def update_user_photos(
+        self,
+        usertelegramid: str,
+        photos: List[dict]  # Принимаем список словарей вместо строк
+    ) -> bool:
+        """Обновление фотографий пользователя с поддержкой S3"""
         logger.info(f"Updating photos for user {usertelegramid}")
-        async with self.pool.acquire() as conn:
-            try:
-                # Удаляем старые фото
-                delete_result = await conn.execute(
-                    "DELETE FROM photos WHERE usertelegramid = $1",
-                    usertelegramid
-                )
-                logger.debug(f"Deleted {delete_result.split()[-1]} old photos")
 
-                # Добавляем новые
-                for index, photofileid in enumerate(photos):
-                    await conn.execute(
-                        "INSERT INTO photos (usertelegramid, photofileid, photodisplayorder) VALUES ($1, $2, $3)",
-                        usertelegramid, photofileid, index + 1
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():  # Добавляем транзакцию
+                try:
+                    # Удаляем старые фото
+                    delete_result = await conn.execute(
+                        "DELETE FROM photos WHERE usertelegramid = $1",
+                        usertelegramid
                     )
-                logger.info(f"✅ Added {len(photos)} new photos for user {usertelegramid}")
-                return True
-            except Exception as e:
-                logger.error(f"❌ Error updating photos for user {usertelegramid}")
-                logger.exception(e)
-                return False
+                    logger.debug(f"Deleted {delete_result.split()[-1]} old photos")
+
+                    # Добавляем новые фото с S3 URL
+                    for index, photo_data in enumerate(photos):
+                        await conn.execute(
+                            """INSERT INTO photos
+                            (usertelegramid, photofileid, photourl, photodisplayorder)
+                            VALUES ($1, $2, $3, $4)""",
+                            usertelegramid,
+                            photo_data["file_id"],
+                            photo_data["s3_url"],
+                            index + 1
+                        )
+
+                    logger.info(f"✅ Added {len(photos)} photos with S3 URLs for user {usertelegramid}")
+                    return True
+
+                except Exception as e:
+                    logger.error(f"❌ Error updating photos for user {usertelegramid}: {str(e)}")
+                    return False
 
     async def get_questions_and_answers(self) -> tuple[Dict, Dict]:
         """Получение вопросов и ответов для теста"""
@@ -618,9 +630,9 @@ class Database:
 
                 except Exception as e:
                     logger.error(f"Ошибка SQL при активации подписки: {e}")
+                return True
 
         except Exception as e:
             logger.error(f"❌ Ошибка активации подписки: {e}")
             logger.exception(e)
             return False
-        return True

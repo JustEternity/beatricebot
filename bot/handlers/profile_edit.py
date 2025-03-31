@@ -1,27 +1,77 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InputMediaPhoto, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 
 from bot.models.states import RegistrationStates
 from bot.services.city_validator import city_validator
 from bot.services.database import Database
 from bot.services.encryption import CryptoService
+from bot.services.s3storage import S3Service
 from bot.keyboards.menus import edit_profile_keyboard, view_profile, has_answers_keyboard, back_to_menu_button
 from bot.services.utils import delete_previous_messages
 
+from io import BytesIO
+import os
 import logging
 logger = logging.getLogger(__name__)
 router = Router()
 
+async def is_photo_available(bot: Bot, file_id: str) -> bool:
+    """Упрощенная проверка доступности фото"""
+    try:
+        await bot.get_file(file_id)
+        return True
+    except TelegramBadRequest:
+        return False
+
 # Просмотр профиля - главное меню
 @router.callback_query(F.data == "view_profile")
-async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database):
+async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database, bot: Bot, s3: S3Service):
     await delete_previous_messages(callback.message, state)
+    user_id = callback.from_user.id
 
     # Получаем данные пользователя
-    user_data = await db.get_user_data(callback.from_user.id)
+    user_data = await db.get_user_data(user_id)
+
+    # Проверяем доступность всех фото
+    need_refresh = False
+    for photo in user_data.get('photos', []):
+        if not await is_photo_available(bot, photo):
+            need_refresh = True
+            break
+
+    if need_refresh:
+        # Получаем все S3 URL из базы
+        s3_urls = [photo['s3_url'] for photo in user_data.get('photos', [])]
+
+        # 1. Удаляем все старые записи
+        await db.update_user_photos(user_id, [])
+
+        # 2. Скачиваем фото из S3
+        local_paths = await s3.download_photos_by_urls(s3_urls)
+
+        # 3. Перезагружаем фото в Telegram и сохраняем новые file_id
+        new_photos = []
+        for path in local_paths:
+            try:
+                with open(path, 'rb') as f:
+                    msg = await bot.send_photo(user_id, f)
+                    new_photos.append({
+                        'photofileid': msg.photo[-1].file_id,
+                        's3_url': next(url for url in s3_urls if url.split('/')[-1] in path)
+                    })
+                os.remove(path)
+            except Exception as e:
+                logger.error(f"Error reloading photo: {str(e)}")
+
+        # 4. Сохраняем новые данные
+        if new_photos:
+            await db.update_user_photos(user_id, new_photos)
+            user_data['photos'] = new_photos
+
     logger.debug(f"Retrieved profile data with keys: {list(user_data.keys())}")
 
     # Декодируем зашифрованные данные
@@ -187,23 +237,55 @@ async def process_edit_description(message: Message, state: FSMContext, crypto: 
 
 # Редактирование фото
 @router.callback_query(F.data == "edit_photos")
-async def edit_photos_handler(callback: CallbackQuery, state: FSMContext):
-    builder = ReplyKeyboardBuilder()
-    builder.add(KeyboardButton(text="📷 Добавить фото"))
-    builder.add(KeyboardButton(text="✅ Завершить"))
-    msg = await callback.message.answer(
-        "Отправьте новые фотографии (максимум 3):",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
-    await state.update_data(
-        edit_message_id=msg.message_id,
-        temp_photos=[]
-    )
-    await state.set_state(RegistrationStates.EDIT_PHOTOS)
-    await callback.answer()
+async def edit_photos_handler(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    s3: S3Service
+):
+    user_id = callback.from_user.id
+
+    try:
+        # Удаляем все старые фото пользователя
+        delete_success = await s3.delete_user_photos(user_id)
+
+        if not delete_success:
+            await callback.answer("❌ Ошибка при удалении старых фото", show_alert=True)
+            return
+
+        # Очищаем фото в базе данных
+        if not await db.update_user_photos(user_id, []):
+            await callback.answer("❌ Ошибка очистки фото в базе", show_alert=True)
+            return
+
+        # Настраиваем интерфейс
+        builder = ReplyKeyboardBuilder()
+        builder.add(KeyboardButton(text="📷 Добавить фото"))
+        builder.add(KeyboardButton(text="✅ Завершить"))
+
+        msg = await callback.message.answer(
+            "Отправьте новые фотографии (максимум 3):",
+            reply_markup=builder.as_markup(resize_keyboard=True)
+        )
+
+        await state.update_data(
+            edit_message_id=msg.message_id,
+            temp_photos=[]
+        )
+        await state.set_state(RegistrationStates.EDIT_PHOTOS)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Edit photos init error: {str(e)}")
+        await callback.answer("❌ Критическая ошибка инициализации", show_alert=True)
 
 @router.message(RegistrationStates.EDIT_PHOTOS, F.photo)
-async def process_edit_photos_photo(message: Message, state: FSMContext):
+async def process_edit_photos_photo(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    s3: S3Service
+):
     data = await state.get_data()
     temp_photos = data.get('temp_photos', [])
 
@@ -211,20 +293,52 @@ async def process_edit_photos_photo(message: Message, state: FSMContext):
         await message.answer("⚠️ Достигнут лимит в 3 фотографии")
         return
 
-    temp_photos.append(message.photo[-1].file_id)
-    await state.update_data(temp_photos=temp_photos)
+    try:
+        # Скачиваем и обрабатываем фото
+        file_id = message.photo[-1].file_id
+        file = await bot.get_file(file_id)
 
-    builder = ReplyKeyboardBuilder()
-    builder.add(KeyboardButton(text="📷 Добавить еще"))
-    builder.add(KeyboardButton(text="✅ Завершить"))
+        file_data = BytesIO()
+        await bot.download_file(file.file_path, file_data)
+        file_data.seek(0)
 
-    await message.answer(
-        f"✅ Добавлено фото ({len(temp_photos)}/3)",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
+        # Загружаем в S3
+        s3_url = await s3.upload_photo(file_data, message.from_user.id)
+
+        if not s3_url:
+            await message.answer("⚠️ Ошибка загрузки фото. Попробуйте еще раз")
+            return
+
+        # Сохраняем данные
+        temp_photos.append({
+            "file_id": file_id,
+            "s3_url": s3_url
+        })
+
+        await state.update_data(temp_photos=temp_photos)
+
+        # Обновляем клавиатуру
+        builder = ReplyKeyboardBuilder()
+        builder.add(KeyboardButton(text="📷 Добавить еще"))
+        builder.add(KeyboardButton(text="✅ Завершить"))
+
+        await message.answer(
+            f"✅ Добавлено фото ({len(temp_photos)}/3)",
+            reply_markup=builder.as_markup(resize_keyboard=True)
+        )
+
+    except Exception as e:
+        logger.error(f"Photo edit error: {str(e)}")
+        await message.answer("⚠️ Ошибка при обработке фото. Попробуйте еще раз")
 
 @router.message(RegistrationStates.EDIT_PHOTOS, F.text == "✅ Завершить")
-async def process_edit_photos_finish(message: Message, state: FSMContext, db: Database):
+async def process_edit_photos_finish(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+    s3: S3Service
+):
+    user_id = message.from_user.id
     data = await state.get_data()
     temp_photos = data.get('temp_photos', [])
 
@@ -232,10 +346,19 @@ async def process_edit_photos_finish(message: Message, state: FSMContext, db: Da
         await message.answer("⚠️ Вы не добавили ни одной фотографии")
         return
 
-    if await db.update_user_photos(message.from_user.id, temp_photos):
-        await message.answer("✅ Фотографии успешно обновлены!", reply_markup=ReplyKeyboardRemove())
-    else:
-        await message.answer("❌ Ошибка при обновлении фотографий", reply_markup=ReplyKeyboardRemove())
+    try:
+        # Фиксируем новые фото в базе
+        if await db.update_user_photos(user_id, temp_photos):
+            await message.answer("✅ Фотографии успешно обновлены!", reply_markup=ReplyKeyboardRemove())
+        else:
+            # Если ошибка базы - удаляем загруженные фото
+            await s3.delete_user_photos(user_id)
+            await message.answer("❌ Ошибка при обновлении фотографий", reply_markup=ReplyKeyboardRemove())
+
+    except Exception as e:
+        logger.error(f"Final photo update error: {str(e)}")
+        await s3.delete_user_photos(user_id)
+        await message.answer("❌ Критическая ошибка при сохранении", reply_markup=ReplyKeyboardRemove())
 
     await show_edit_menu(message, state)
 
