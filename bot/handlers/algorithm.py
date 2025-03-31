@@ -107,23 +107,23 @@ async def show_compatible_user(message: Message, state: FSMContext, db: Database
 
         # Получаем данные текущего совместимого пользователя
         current_user = compatible_users[current_index]
-        
+
         # Получаем профиль и совместимость
         user_profile = current_user['profile']
         compatibility = current_user['compatibility']
-        
+
         # Форматируем текст профиля - ВАЖНО: передаем crypto
         profile_text = await format_profile_text(user_profile, crypto)
-        
+
         # Добавляем информацию о совместимости
         profile_text += f"<b>Совместимость:</b> {compatibility}%"
-        
+
         # Получаем фото пользователя
         photos = user_profile.get('photos', [])
-        
+
         # Создаем клавиатуру навигации
         keyboard = compatible_navigation_keyboard(user_profile['telegramid'])
-        
+
         # Отправляем сообщение с фото или без
         if photos:
             await message.answer_photo(
@@ -217,41 +217,6 @@ async def like_user_handler(callback: CallbackQuery, state: FSMContext, db: Data
     # Показываем следующего пользователя - ВАЖНО: передаем crypto
     await show_compatible_user(callback.message, state, db, crypto)
 
-@router.callback_query(F.data == "manage_subscription")
-async def manage_subscription_handler(callback: CallbackQuery, state: FSMContext):
-    # Получаем текущий статус подписки из состояния
-    data = await state.get_data()
-    has_subscription = data.get('has_subscription', False)
-
-    # Создаем клавиатуру
-    builder = InlineKeyboardBuilder()
-
-    if has_subscription:
-        builder.button(text="❌ Отменить подписку", callback_data="remove_subscription")
-    else:
-        builder.button(text="✅ Активировать подписку", callback_data="activate_subscription")
-
-    builder.button(text="◀️ Назад", callback_data="back_to_menu")
-    builder.adjust(1)
-
-    await callback.message.edit_text(
-        f"🔐 Статус подписки: {'Активна ✅' if has_subscription else 'Неактивна ❌'}",
-        reply_markup=builder.as_markup()
-    )
-    await callback.answer()
-
-@router.callback_query(F.data == "activate_subscription")
-async def activate_subscription_handler(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(has_subscription=True)
-    await callback.answer("✅ Подписка активирована!", show_alert=True)
-    await manage_subscription_handler(callback, state)
-
-@router.callback_query(F.data == "remove_subscription")
-async def remove_subscription_handler(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(has_subscription=False)
-    await callback.answer("❌ Подписка отменена", show_alert=True)
-    await manage_subscription_handler(callback, state)
-
 # Обработчики фильтров
 @router.callback_query(F.data == "filter_city")
 async def filter_city_handler(callback: CallbackQuery, state: FSMContext):
@@ -296,10 +261,10 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
 
     # Получаем фильтры из состояния
     filters = await state.get_data()
-    
+
     # Создаем сервис совместимости
     compatibility_service = CompatibilityService(db)
-    
+
     # Ищем пользователей с учетом фильтров
     high_compatible_users, low_compatible_users = await compatibility_service.find_compatible_users(
         user_id=callback.from_user.id,
@@ -312,10 +277,10 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
         limit=10,
         min_score=50.0
     )
-    
+
     # Объединяем результаты
     all_compatible_users = high_compatible_users + low_compatible_users
-    
+
     if not all_compatible_users:
         await callback.message.edit_text(
             "😔 По вашим фильтрам совместимых пользователей не найдено.",
@@ -324,13 +289,13 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
             ])
         )
         return
-    
+
     # Сохраняем результаты поиска
     await state.update_data(
         compatible_users=all_compatible_users,
         current_compatible_index=0
     )
-    
+
     # Показываем первого пользователя - ВАЖНО: передаем crypto
     await show_compatible_user(callback.message, state, db, crypto)
 

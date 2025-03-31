@@ -9,7 +9,6 @@ from bot.services.database import Database
 from bot.services.encryption import CryptoService
 from bot.middlewares.basic import DependencyInjectionMiddleware
 from bot.services.s3storage import S3Service
-from bot.handlers.subscription import router as subscription_router
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -50,8 +49,6 @@ async def main():
         # Подключение роутеров
         for router in routers:
             dp.include_router(router)
-
-        dp.include_router(subscription_router)
 
         logger.info("Bot starting...")
         await dp.start_polling(bot)
