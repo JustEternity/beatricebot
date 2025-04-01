@@ -488,85 +488,89 @@ class Database:
             logger.error(f"Error getting user profile for {user_id}: {e}")
             return None
 
-    async def get_user_photos(self, user_id: int) -> List[str]:
-        """Получает список ID фотографий пользователя"""
-        logger.debug(f"Getting photos for user {user_id}")
-        async with self.pool.acquire() as conn:
-            try:
-                rows = await conn.fetch(
-                    "SELECT photofileid FROM photos WHERE usertelegramid = $1 ORDER BY photodisplayorder",
-                    user_id
-                )
+    async def get_user_photos(self, user_id):
+        """Получает фотографии пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                SELECT photofileid, photourl
+                FROM photos
+                WHERE usertelegramid = $1
+                ORDER BY photodisplayorder
+                """
+                rows = await conn.fetch(query, user_id)
+                
+                # Логируем для отладки
+                photos = [row['photofileid'] for row in rows] if rows else []
+                logger.debug(f"Получено {len(photos)} фотографий для пользователя {user_id}")
+                for i, photo in enumerate(photos):
+                    logger.debug(f"Фото {i+1}: {photo[:30]}...")
+                    
+                return photos
+        except Exception as e:
+            logger.error(f"Ошибка при получении фотографий пользователя {user_id}: {e}")
+            return []
 
-                return [row['photofileid'] for row in rows]
-            except Exception as e:
-                logger.error(f"Error getting photos for user {user_id}: {e}")
-                return []
-
-    async def add_like(self, from_user_id: int, to_user_id: int) -> bool:
+    async def add_like(self, from_user_id, to_user_id):
         """Добавляет лайк от одного пользователя к другому"""
-        logger.info(f"User {from_user_id} likes user {to_user_id}")
         try:
+            # Используем правильные имена столбцов
+            query = """
+            INSERT INTO likes (sendertelegramid, receivertelegramid, likeviewedstatus)
+            VALUES ($1, $2, false)
+            RETURNING likeid
+            """
             async with self.pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO likes (from_user_telegram_id, to_user_telegram_id, created_at)
-                    VALUES ($1, $2, NOW())
-                    ON CONFLICT (from_user_telegram_id, to_user_telegram_id)
-                    DO NOTHING
-                    """,
-                    from_user_id, to_user_id
-                )
-                return True
+                result = await conn.fetchval(query, from_user_id, to_user_id)
+            logger.info(f"User {from_user_id} likes user {to_user_id}")
+            return result
         except Exception as e:
-            logger.error(f"Error adding like from {from_user_id} to {to_user_id}: {e}")
-            # Проверим структуру таблицы
+            logger.error(f"Error adding like from {from_user_id} to {to_user_id}: {str(e)}")
+            # Выводим структуру таблицы для отладки
             try:
-                async with self.pool.acquire() as conn:
-                    table_info = await conn.fetch(
-                        """
-                        SELECT column_name, data_type
-                        FROM information_schema.columns
-                        WHERE table_name = 'likes'
-                        """
-                    )
-                    logger.info(f"Структура таблицы likes: {[dict(row) for row in table_info]}")
-            except Exception as table_error:
-                logger.error(f"Ошибка при получении структуры таблицы: {table_error}")
+                structure = await self.get_table_structure("likes")
+                logger.info(f"Структура таблицы likes: {structure}")
+            except:
+                logger.error("Не удалось получить структуру таблицы likes")
+            return None
+
+    async def check_mutual_like(self, user1_id, user2_id):
+        """Проверяет наличие взаимных лайков между пользователями"""
+        try:
+            logger.debug(f"Проверка взаимных лайков между {user1_id} и {user2_id}")
+            async with self.pool.acquire() as conn:
+                query = """
+                SELECT COUNT(*) FROM likes 
+                WHERE (sendertelegramid = $1 AND receivertelegramid = $2)
+                AND EXISTS (
+                    SELECT 1 FROM likes 
+                    WHERE sendertelegramid = $2 AND receivertelegramid = $1
+                )
+                """
+                count = await conn.fetchval(query, user1_id, user2_id)
+            return count > 0
+        except Exception as e:
+            logger.error(f"Ошибка при проверке взаимных лайков: {str(e)}")
             return False
 
-    async def check_mutual_like(self, user1_id: int, user2_id: int) -> bool:
-        """Проверяет, есть ли взаимный лайк между пользователями"""
-        logger.debug(f"Checking mutual like between {user1_id} and {user2_id}")
+    async def get_mutual_likes(self, user_id):
+        """Получает список пользователей, с которыми есть взаимные лайки"""
         try:
             async with self.pool.acquire() as conn:
-                # Проверяем, лайкнул ли user1 пользователя user2
-                like1 = await conn.fetchval(
-                    """
-                    SELECT EXISTS(
-                        SELECT 1 FROM likes
-                        WHERE from_user_telegram_id = $1 AND to_user_telegram_id = $2
-                    )
-                    """,
-                    user1_id, user2_id
+                query = """
+                SELECT u.* FROM users u
+                WHERE u.telegramid IN (
+                    SELECT l1.sendertelegramid FROM likes l1
+                    JOIN likes l2 ON l1.sendertelegramid = l2.receivertelegramid
+                                AND l1.receivertelegramid = l2.sendertelegramid
+                    WHERE l1.receivertelegramid = $1
                 )
-
-                # Проверяем, лайкнул ли user2 пользователя user1
-                like2 = await conn.fetchval(
-                    """
-                    SELECT EXISTS(
-                        SELECT 1 FROM likes
-                        WHERE from_user_telegram_id = $1 AND to_user_telegram_id = $2
-                    )
-                    """,
-                    user2_id, user1_id
-                )
-
-                # Взаимный лайк есть, если оба пользователя лайкнули друг друга
-                return like1 and like2
+                """
+                rows = await conn.fetch(query, user_id)
+            return [dict(row) for row in rows]
         except Exception as e:
-            logger.error(f"Error checking mutual like between {user1_id} and {user2_id}: {e}")
-            return False
+            logger.error(f"Ошибка при получении взаимных лайков: {str(e)}")
+            return []
 
     async def check_user_subscription(self, user_id: int) -> bool:
         """Проверяет, есть ли у пользователя активная подписка"""
@@ -656,4 +660,118 @@ class Database:
             logger.error(f"Feedback save error: {str(e)}")
             return False
 
+    async def get_table_structure(self, table_name):
+        """Получает структуру таблицы для отладки"""
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = $1
+                """
+                rows = await conn.fetch(query, table_name)
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Ошибка при получении структуры таблицы {table_name}: {str(e)}")
+            return []
 
+    async def get_user_likes(self, user_id):
+        """Получает список пользователей, которые лайкнули текущего пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                SELECT 
+                    l.likeid, 
+                    l.sendertelegramid as from_user_id, 
+                    l.receivertelegramid as to_user_id, 
+                    l.likeviewedstatus
+                FROM likes l
+                JOIN users u ON l.sendertelegramid = u.telegramid
+                WHERE l.receivertelegramid = $1
+                AND l.likeviewedstatus = false
+                ORDER BY l.likeid DESC
+                """
+                rows = await conn.fetch(query, user_id)
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Ошибка при получении лайков пользователя {user_id}: {e}")
+            return []
+        
+    async def get_user_likes_count(self, user_id):
+        """Получает количество лайков пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                SELECT COUNT(*) as count
+                FROM likes
+                WHERE receivertelegramid = $1
+                """
+                result = await conn.fetchval(query, user_id)
+            
+            return result or 0
+        except Exception as e:
+            logger.error(f"Ошибка при получении количества лайков пользователя {user_id}: {e}")
+            return 0
+        
+    async def get_unviewed_likes_count(self, user_id):
+        """Получает количество непросмотренных лайков пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                SELECT COUNT(*) as count
+                FROM likes
+                WHERE receivertelegramid = $1
+                AND likeviewedstatus = false
+                """
+                result = await conn.fetchval(query, user_id)
+                        
+                return result or 0
+        except Exception as e:
+            logger.error(f"Ошибка при получении количества непросмотренных лайков пользователя {user_id}: {e}")
+            return 0
+
+    async def mark_like_as_viewed(self, sender_id: int, receiver_id: int) -> bool:
+        """Отмечает лайк как просмотренный и проверяет дубликаты"""
+        try:
+            async with self.pool.acquire() as conn:
+                # Проверяем существование лайка
+                exists = await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM likes 
+                        WHERE sendertelegramid = $1 
+                        AND receivertelegramid = $2
+                    )
+                """, sender_id, receiver_id)
+                
+                if not exists:
+                    return False
+                    
+                # Обновляем только если еще не просмотрено
+                result = await conn.execute("""
+                    UPDATE likes
+                    SET likeviewedstatus = true
+                    WHERE sendertelegramid = $1 
+                    AND receivertelegramid = $2
+                    AND likeviewedstatus = false
+                    RETURNING likeid
+                """, sender_id, receiver_id)
+                
+                return bool(await result.fetchone())
+        except Exception as e:
+            logger.error(f"Ошибка при отметке лайка: {e}")
+            return False
+    
+    async def check_like_exists(self, sender_id: int, receiver_id: int) -> bool:
+        """Проверяет, существует ли уже такой лайк"""
+        try:
+            async with self.pool.acquire() as conn:
+                return await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM likes 
+                        WHERE sendertelegramid = $1 
+                        AND receivertelegramid = $2
+                    )
+                """, sender_id, receiver_id)
+        except Exception as e:
+            logger.error(f"Ошибка проверки лайка: {e}")
+            return False

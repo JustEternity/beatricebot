@@ -15,11 +15,14 @@ def policy_keyboard() -> ReplyKeyboardMarkup:
         one_time_keyboard=True
     )
 
-def main_menu() -> InlineKeyboardMarkup:
-    """Инлайн-клавиатура главного меню"""
+def main_menu(likes_count=0) -> InlineKeyboardMarkup:
+    """Инлайн-клавиатура главного меню с количеством лайков"""
+    likes_text = f"❤️ Лайки ({likes_count})" if likes_count > 0 else "❤️ Лайки"
+    
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👤 Моя анкета", callback_data="view_profile")],
+            [InlineKeyboardButton(text=likes_text, callback_data="view_likes")],
             [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")],
             [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")],
             [InlineKeyboardButton(text="💎 Подписка", callback_data="subscription_info")],
@@ -84,23 +87,35 @@ def has_answers_keyboard() -> InlineKeyboardMarkup:
                 [InlineKeyboardButton(text="❌ Отмена", callback_data="back_to_menu")]
             ])
 
-
-def compatible_navigation_keyboard(user_id: int = None) -> InlineKeyboardMarkup:
-    """Клавиатура для навигации по совместимым пользователям"""
+def compatible_navigation_keyboard(
+    user_id: int = None,
+    is_first: bool = False,
+    is_last: bool = False,
+    is_initial: bool = False
+) -> InlineKeyboardMarkup:
+    """Клавиатура с обязательными кнопками 'Лайк' и 'Пропустить'"""
     buttons = []
-
-    # Если передан ID пользователя, добавляем кнопки "Пропустить" и "Нравится"
+    
+    # Основной ряд
+    main_buttons = []
+    
+    # Кнопка "Назад" (показываем всегда, кроме первой анкеты)
+    if not is_first:
+        main_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="prev_compatible"))
+    
+    # Кнопка "Лайк" - всегда показываем
     if user_id:
-        buttons.append([
-            InlineKeyboardButton(text="👎 Пропустить", callback_data="next_compatible"),
-            InlineKeyboardButton(text="👍 Нравится", callback_data=f"like_user_{user_id}")
-        ])
-    else:
-        buttons.append([InlineKeyboardButton(text="➡️ Следующий", callback_data="next_compatible")])
-
-    # Добавляем кнопку возврата в меню
-    buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")])
-
+        main_buttons.append(InlineKeyboardButton(text="❤️ Лайк", callback_data=f"like_user_{user_id}"))
+    
+    # Кнопка "Пропустить" - всегда показываем, независимо от позиции анкеты
+    main_buttons.append(InlineKeyboardButton(text="👎 Пропустить", callback_data="next_compatible"))
+    
+    if main_buttons:
+        buttons.append(main_buttons)
+    
+    # Кнопка возврата в меню (всегда)
+    buttons.append([InlineKeyboardButton(text="◀️ В меню", callback_data="back_to_menu")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def subscription_keyboard() -> InlineKeyboardMarkup:
