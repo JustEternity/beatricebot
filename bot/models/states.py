@@ -10,24 +10,31 @@ class RegistrationStates(StatesGroup):
     PHOTOS = State()           # Загрузка фотографий
     DESCRIPTION = State()      # Ввод описания
     MAIN_MENU = State()        # Главное меню после регистрации
-
+    
     # Состояния редактирования профиля
     EDIT_NAME = State()        # Редактирование имени
     EDIT_AGE = State()         # Редактирование возраста
     EDIT_LOCATION = State()    # Редактирование локации
     EDIT_PHOTOS = State()      # Редактирование фотографий
     EDIT_DESCRIPTION = State() # Редактирование описания
-
+    
     SET_FILTER_CITY = State()
     SET_FILTER_AGE = State()
     SET_FILTER_GENDER = State()
     SET_FILTER_OCCUPATION = State()
     SET_FILTER_GOALS = State()
-
+    
     VIEW_PROFILE = State()     # Просмотр профиля
-
     SEND_FEEDBACK = State()    # Отправка обратной связи
-
+    
     # Состояния тестирования
     TEST_IN_PROGRESS = State() # Начало тестирования
     TEST_QUESTION = State()    # Обработка вопросов теста
+    
+    # Состояния просмотра лайков
+    VIEWING_LIKES = State()    # Просмотр лайков
+
+
+class ViewLikesState(StatesGroup):
+    """Состояния для просмотра лайков"""
+    viewing = State()

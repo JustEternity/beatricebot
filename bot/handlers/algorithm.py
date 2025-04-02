@@ -16,28 +16,6 @@ import logging
 logger = logging.getLogger(__name__)
 router = Router()
 
-async def update_all_users_priority(self):
-    """Обновляет коэффициенты приоритета для всех пользователей"""
-    logger.info("Updating priority coefficients for all users")
-    try:
-        async with self.pool.acquire() as conn:
-            # Получаем всех пользователей
-            users = await conn.fetch("SELECT telegramid FROM users")
-
-            updated_count = 0
-            for user in users:
-                user_id = user['telegramid']
-                success = await self.fix_priority_coefficient(user_id)
-                if success:
-                    updated_count += 1
-
-            logger.info(f"Updated priority coefficients for {updated_count}/{len(users)} users")
-            return updated_count
-    except Exception as e:
-        logger.error(f"Error updating all users priority: {e}")
-        logger.exception(e)
-        return 0
-
 # Функция для безопасного удаления сообщений
 async def delete_message_safely(message):
     """Безопасно удаляет сообщение с обработкой ошибок"""
@@ -47,15 +25,62 @@ async def delete_message_safely(message):
         logger.debug(f"Не удалось удалить сообщение: {e}")
 
 async def send_like_notification(bot, from_user_id, to_user_id, db, crypto=None):
-    """Отправляет уведомление пользователю о том, что его лайкнули"""
-    logger.debug(f"Отправка уведомления о лайке от {from_user_id} пользователю {to_user_id}")
-    
+    """Отправляет уведомление о лайке пользователю"""
     try:
-        # Создаем клавиатуру с кнопками для просмотра лайков или возврата в меню
+        # Создаем клавиатуру с двумя кнопками: "Посмотреть" и "В меню"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
-                text="👀 Посмотреть лайки", 
-                callback_data="view_likes"
+                text="👁️ Посмотреть",
+                callback_data=f"view_liker:{from_user_id}"
+            )],
+            [InlineKeyboardButton(
+                text="◀️ В главное меню",
+                callback_data="back_to_menu"
+            )]
+        ])
+                
+        # Отправляем уведомление без указания конкретного пользователя
+        message = await bot.send_message(
+            chat_id=to_user_id,
+            text=f"❤️ <b>Кто-то проявил к вам симпатию!</b>\n\n"
+                 f"Хотите посмотреть профиль?",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+                
+        logger.debug(f"Отправка уведомления о лайке от {from_user_id} пользователю {to_user_id}")
+        logger.info(f"Уведомление о лайке от {from_user_id} успешно отправлено пользователю {to_user_id}")
+        return True
+            
+    except TelegramAPIError as e:
+        logger.error(f"Ошибка Telegram API при отправке уведомления о лайке: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка при отправке уведомления о лайке: {e}")
+        return False
+
+async def send_match_notification(bot, user1_id, user2_id, db, crypto=None):
+    """Отправляет уведомление о взаимной симпатии обоим пользователям"""
+    logger.info(f"Отправка уведомлений о взаимной симпатии между {user1_id} и {user2_id}")
+    
+    try:
+        # Получаем профили пользователей
+        user1_profile = await db.get_user_profile(user1_id)
+        user2_profile = await db.get_user_profile(user2_id)
+        
+        if not user1_profile or not user2_profile:
+            logger.error(f"Не удалось получить профили пользователей {user1_id} и {user2_id}")
+            return False
+        
+        # Получаем имена пользователей
+        user1_name = user1_profile.get('name', user1_profile.get('username', 'Пользователь'))
+        user2_name = user2_profile.get('name', user2_profile.get('username', 'Пользователь'))
+        
+        # Отправляем уведомление первому пользователю
+        keyboard1 = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="💬 Начать общение", 
+                url=f"tg://user?id={user2_id}"
             )],
             [InlineKeyboardButton(
                 text="◀️ В меню", 
@@ -63,58 +88,90 @@ async def send_like_notification(bot, from_user_id, to_user_id, db, crypto=None)
             )]
         ])
         
-        # Отправляем уведомление без информации о пользователе
         await bot.send_message(
-            chat_id=to_user_id,
-            text=f"❤️ *Вас лайкнули!*\n\n"
-                 f"Кто-то оценил ваш профиль. Хотите узнать, кто это?",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
+            chat_id=user1_id,
+            text=f"✨ <b>У вас взаимная симпатия с {user2_name}!</b> ✨\n\n"
+                 f"Теперь вы можете начать общение.",
+            reply_markup=keyboard1,
+            parse_mode="HTML"
         )
+        
+        # Отправляем уведомление второму пользователю
+        keyboard2 = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="💬 Начать общение", 
+                url=f"tg://user?id={user1_id}"
+            )],
+            [InlineKeyboardButton(
+                text="◀️ В меню", 
+                callback_data="back_to_menu"
+            )]
+        ])
+        
+        await bot.send_message(
+            chat_id=user2_id,
+            text=f"✨ <b>У вас взаимная симпатия с {user1_name}!</b> ✨\n\n"
+                 f"Теперь вы можете начать общение.",
+            reply_markup=keyboard2,
+            parse_mode="HTML"
+        )
+        
+        logger.info(f"Уведомления о взаимной симпатии успешно отправлены")
         return True
+        
     except TelegramAPIError as e:
-        if "bot was blocked by the user" in str(e).lower():
-            logger.warning(f"Бот заблокирован пользователем {to_user_id}")
-        elif "chat not found" in str(e).lower():
-            logger.warning(f"Чат с пользователем {to_user_id} не найден")
-        else:
-            logger.error(f"Ошибка Telegram API при отправке уведомления: {e}")
+        logger.error(f"Ошибка Telegram API при отправке уведомления о взаимной симпатии: {e}")
         return False
     except Exception as e:
-        logger.error(f"Ошибка при отправке уведомления о лайке: {e}")
+        logger.error(f"Ошибка при отправке уведомления о взаимной симпатии: {e}")
         return False
 
 @router.callback_query(F.data == "view_likes")
 async def view_likes_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
-    """Обработчик просмотра лайков"""
-    await callback.answer()
-    
+    """Обработчик для просмотра лайков"""
     try:
-        # Получаем только непросмотренные лайки
-        likes = await db.get_user_likes(callback.from_user.id)
+        # Добавим логирование для отладки
+        logger.debug(f"Вызван обработчик view_likes_handler для пользователя {callback.from_user.id}")
         
-        if not likes:
+        # Получаем список лайков
+        likes = await db.get_user_likes(callback.from_user.id)
+        logger.debug(f"Получено {len(likes) if likes else 0} лайков для пользователя {callback.from_user.id}")
+        
+        # Фильтруем только непросмотренные лайки
+        unviewed_likes = [like for like in likes if not like.get('likeviewedstatus', False)]
+        logger.debug(f"Из них {len(unviewed_likes)} непросмотренных")
+        
+        if not unviewed_likes:
+            # Если нет непросмотренных лайков, сообщаем об этом
             await callback.message.edit_text(
-                "У вас пока нет новых лайков.",
+                "У вас нет непросмотренных лайков.",
                 reply_markup=back_to_menu_button()
             )
             return
         
-        # Сохраняем в состоянии
-        await state.update_data(
-            likes_list=likes,
-            current_like_index=0
-        )
+        # Сохраняем список лайков в состоянии
+        await state.update_data(likes_list=unviewed_likes, current_like_index=0)
         
-        # Показываем первый профиль
-        await show_like_profile(callback.message, state, db, crypto)
+        # Удаляем текущее сообщение, чтобы избежать ошибок при редактировании
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logger.warning(f"Не удалось удалить сообщение: {e}")
+        
+        # Показываем первый лайк
+        await show_like_profile(callback.message, callback.from_user.id, state, db, crypto)
         
     except Exception as e:
-        logger.error(f"Ошибка в view_likes_handler: {e}")
-        await callback.message.edit_text(
-            "Ошибка при загрузке лайков",
-            reply_markup=back_to_menu_button()
-        )
+        logger.error(f"Ошибка в view_likes_handler: {e}", exc_info=True)
+        # Пробуем отправить новое сообщение вместо редактирования
+        try:
+            await callback.message.answer(
+                "Произошла ошибка при загрузке лайков.",
+                reply_markup=back_to_menu_button()
+            )
+        except Exception:
+            await callback.answer("Произошла ошибка. Вернитесь в главное меню.")
+
 
 @router.callback_query(F.data.startswith("view_liker:"))
 async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
@@ -137,115 +194,172 @@ async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext,
     
     # Создаем клавиатуру с кнопками действий
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="❤️ Нравится", 
+                callback_data=f"like_back:{liker_id}"
+            ),
+            InlineKeyboardButton(
+                text="👎 Не нравится", 
+                callback_data=f"dislike_user:{liker_id}"
+            )
+        ],
         [InlineKeyboardButton(
-            text="❤️ Лайкнуть в ответ", 
-            callback_data=f"like_back:{liker_id}"
-        )],
-        [InlineKeyboardButton(
-            text="◀️ Назад", 
+            text="◀️ Назад в главное меню", 
             callback_data="back_to_menu"
         )]
     ])
     
-    # Отправляем профиль
-    await callback.message.edit_text(
-        profile_text,
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
-    
-async def show_like_profile(message: Message, state: FSMContext, db: Database, crypto=None):
     try:
+        # Если есть фотографии, отправляем с фото
+        if user_photos and len(user_photos) > 0:
+            # Если текущее сообщение имеет фото, редактируем его
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=profile_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            else:
+                # Иначе отправляем новое сообщение с фото
+                await callback.message.delete()
+                await callback.message.answer_photo(
+                    photo=user_photos[0],
+                    caption=profile_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+        else:
+            # Если фото нет, отправляем только текст
+            await callback.message.edit_text(
+                profile_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.warning(f"Не удалось отредактировать сообщение: {e}")
+        
+        # Если не удалось отредактировать, отправляем новое сообщение
+        if user_photos and len(user_photos) > 0:
+            await callback.message.answer_photo(
+                photo=user_photos[0],
+                caption=profile_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.answer(
+                profile_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+    
+async def show_like_profile(message: Message, user_id: int, state: FSMContext, db: Database, crypto=None):
+    """Показывает профиль пользователя, который поставил лайк"""
+    try:
+        # Получаем данные из состояния
         state_data = await state.get_data()
         current_index = state_data.get("current_like_index", 0)
         likes_list = state_data.get("likes_list", [])
         
-        if not likes_list or current_index >= len(likes_list):
-            # Универсальный способ вернуться в меню
-            try:
-                if hasattr(message, 'photo') and message.photo:
-                    await message.edit_caption(
-                        caption="Вы просмотрели все лайки!",
-                        reply_markup=back_to_menu_button()
-                    )
-                else:
-                    await message.edit_text(
-                        "Вы просмотрели все лайки!",
-                        reply_markup=back_to_menu_button()
-                    )
-            except Exception as e:
-                logger.warning(f"Не удалось отредактировать сообщение: {e}")
+        logger.debug(f"show_like_profile: index={current_index}, total likes={len(likes_list)}")
+        
+        # Если список лайков пуст
+        if not likes_list:
+            await message.answer(
+                "У вас нет непросмотренных лайков.",
+                reply_markup=back_to_menu_button()
+            )
+            return
+        
+        # Проверяем, не вышли ли за границы списка
+        if current_index >= len(likes_list):
+            current_index = 0
+        
+        # Получаем текущий лайк
+        current_like = likes_list[current_index]
+        logger.debug(f"Текущий лайк: {current_like}")
+        
+        # Определяем ID пользователя, который поставил лайк
+        if 'from_user_id' in current_like:
+            liker_id = current_like['from_user_id']
+        elif 'sendertelegramid' in current_like:
+            liker_id = current_like['sendertelegramid']
+        else:
+            # Логируем структуру для отладки
+            logger.error(f"Неизвестная структура лайка: {current_like}")
+            await message.answer(
+                "Ошибка при загрузке профиля. Пожалуйста, попробуйте позже.",
+                reply_markup=back_to_menu_button()
+            )
+            return
+        
+        logger.debug(f"ID пользователя, поставившего лайк: {liker_id}")
+        
+        # Получаем профиль пользователя
+        user_profile = await db.get_user_profile(liker_id)
+        user_photos = await db.get_user_photos(liker_id)
+        
+        if not user_profile:
+            # Если профиль не найден, удаляем его из списка и показываем следующий
+            likes_list.pop(current_index)
+            await state.update_data(likes_list=likes_list)
+            
+            if not likes_list:
                 await message.answer(
-                    "Вы просмотрели все лайки!",
+                    "У вас больше нет непросмотренных лайков.",
                     reply_markup=back_to_menu_button()
                 )
+                return
+            
+            await show_like_profile(message, user_id, state, db, crypto)
             return
-
-        current_like = likes_list[current_index]
-        liker_id = current_like['from_user_id']
         
-        # Проверяем, не пытаемся ли показать тот же профиль
-        if state_data.get('last_shown_profile') == liker_id:
-            return
-
-        user_profile = await db.get_user_profile(liker_id)
-        if not user_profile:
-            await handle_error(message, "Профиль пользователя не найден")
-            return
-
+        # Форматируем профиль
         profile_text = await format_profile_text(user_profile, crypto)
-        keyboard = create_like_keyboard(liker_id)
-
-        photos = await db.get_user_photos(liker_id)
         
-        try:
-            if hasattr(message, 'photo') and message.photo:
-                if photos:
-                    await message.edit_media(
-                        InputMediaPhoto(media=photos[0], caption=profile_text, parse_mode="HTML"),
-                        reply_markup=keyboard
-                    )
-                else:
-                    await message.edit_caption(
-                        caption=profile_text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-            else:
-                if photos:
-                    await message.answer_photo(
-                        photos[0],
-                        caption=profile_text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                else:
-                    await message.answer(
-                        profile_text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-            
-            await db.mark_like_as_viewed(liker_id, message.from_user.id)
-            await state.update_data(last_shown_profile=liker_id)
-            
-        except TelegramBadRequest as e:
-            if "message is not modified" in str(e):
-                logger.debug("Пропускаем дублирующее обновление")
-            else:
-                raise
-                
+        # Создаем клавиатуру
+        keyboard = create_like_keyboard(liker_id)
+        
+        # Отправляем сообщение с профилем
+        if user_photos and len(user_photos) > 0:
+            sent_message = await message.bot.send_photo(
+                chat_id=user_id,
+                photo=user_photos[0],
+                caption=profile_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        else:
+            sent_message = await message.bot.send_message(
+                chat_id=user_id,
+                text=profile_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        
+        # Сохраняем ID сообщения для возможного удаления в будущем
+        await state.update_data(last_like_message_id=sent_message.message_id)
+        
+        # Отмечаем лайк как просмотренный
+        await db.mark_likes_as_viewed(liker_id, user_id)
+        
     except Exception as e:
-        logger.error(f"Ошибка в show_like_profile: {e}")
-        await handle_error(message, "Ошибка при загрузке профиля")
+        logger.error(f"Ошибка при показе профиля лайка: {e}", exc_info=True)
+        await message.bot.send_message(
+            chat_id=user_id,
+            text="Произошла ошибка при загрузке профиля.",
+            reply_markup=back_to_menu_button()
+        )
 
 def create_like_keyboard(liker_id):
+    """Создает стандартную клавиатуру для просмотра лайков"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="❤️ Ответить", callback_data=f"like_back:{liker_id}"),
-            InlineKeyboardButton(text="👎 Пропустить", callback_data="next_like")
+            InlineKeyboardButton(text="❤️ Нравится", callback_data=f"like_back:{liker_id}"),
+            InlineKeyboardButton(text="👎 Не нравится", callback_data=f"dislike_user:{liker_id}")
         ],
-        [InlineKeyboardButton(text="◀️ В меню", callback_data="back_to_menu")]
+        [InlineKeyboardButton(text="◀️ Назад в главное меню", callback_data="back_to_menu")]
     ])
 
 async def handle_error(message: Message, text: str):
@@ -321,76 +435,184 @@ async def mutual_like_handler(callback: CallbackQuery, state: FSMContext, db: Da
             reply_markup=main_menu(likes_count)
         )
 
-@router.callback_query(lambda c: c.data.startswith("dislike_user:"))
-async def handle_dislike(callback: CallbackQuery, state: FSMContext, db: Database):
-    """Обрабатывает дизлайк"""
+@router.callback_query(F.data.startswith("like_user_"))
+async def like_user_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
+    """Обработчик для лайка пользователя"""
     try:
-        liker_id = int(callback.data.split(":")[1])  # Получаем ID лайкнувшего
-
-        # Получаем список лайков и текущий индекс
-        state_data = await state.get_data()
-        likes_list = state_data.get("likes_list", [])
-        current_index = state_data.get("current_like_index", 0)
-
-        # Удаляем лайкнутого пользователя из списка
-        new_likes_list = [like for like in likes_list if like['from_user_id'] != liker_id]
-
-        if new_likes_list:
-            # Обновляем состояние с новым списком лайков
-            await state.update_data(likes_list=new_likes_list, current_like_index=min(current_index, len(new_likes_list) - 1))
-
-            # Показываем следующий профиль
-            await show_like_profile(callback.message, state, db)
+        # Извлекаем ID пользователя из callback_data
+        parts = callback.data.split("_")
+        user_id = int(parts[2])
+        logger.debug(f"Обработка лайка от {callback.from_user.id} к {user_id}")
+        
+        # Проверяем, существует ли уже лайк
+        like_exists = await db.check_like_exists(callback.from_user.id, user_id)
+        
+        # Если лайк не существует, добавляем его
+        if not like_exists:
+            like_id = await db.add_like(callback.from_user.id, user_id)
+            logger.debug(f"Добавлен новый лайк с ID: {like_id}")
         else:
-            # Если больше нет лайков, отправляем сообщение
-            await callback.message.edit_text("У вас больше нет лайков от пользователей.", reply_markup=back_to_menu_button())
-
-        # Уведомляем пользователя, что дизлайк обработан
-        await callback.answer("Профиль удалён из списка.", show_alert=True)
-
+            logger.debug(f"Лайк уже существует")
+        
+        # Проверяем, есть ли взаимный лайк
+        is_mutual = await db.check_mutual_like(callback.from_user.id, user_id)
+        
+        # Удаляем текущее сообщение
+        await delete_message_safely(callback.message)
+        
+        if is_mutual:
+            # Получаем информацию о пользователе, которого лайкнули
+            user_profile = await db.get_user_profile(user_id)
+            
+            # Используем имя по умолчанию
+            user_name = "пользователь"
+            
+            # Если профиль найден, пытаемся получить имя
+            if user_profile and 'name' in user_profile:
+                encrypted_name = user_profile['name']
+                logger.debug(f"Зашифрованное имя: {encrypted_name}, тип: {type(encrypted_name)}")
+                
+                if crypto:
+                    try:
+                        if isinstance(encrypted_name, bytes):
+                            decrypted_name = crypto.decrypt(encrypted_name)
+                            logger.debug(f"Расшифрованное имя (bytes): {decrypted_name}")
+                            
+                            # Проверяем тип расшифрованного имени
+                            if isinstance(decrypted_name, bytes):
+                                user_name = decrypted_name.decode('utf-8')
+                            else:
+                                # Если уже строка, используем как есть
+                                user_name = decrypted_name
+                        else:
+                            logger.warning(f"Неизвестный тип имени: {type(encrypted_name)}")
+                            user_name = str(encrypted_name)
+                    except Exception as e:
+                        logger.error(f"Ошибка при расшифровке имени: {e}", exc_info=True)
+                        user_name = "пользователь"
+                else:
+                    logger.warning("Объект crypto не доступен")
+                    user_name = str(encrypted_name)
+            
+            # Логируем для отладки
+            logger.debug(f"Расшифрованное имя пользователя: {user_name}")
+            
+            # Это взаимный лайк - отправляем уведомление с именем пользователя
+            await callback.message.answer(
+                f"❤️ У вас взаимная симпатия с {user_name}! Теперь вы можете начать общение.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=f"💬 Начать чат с {user_name}", url=f"tg://user?id={user_id}")],
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]
+                ])
+            )
+        else:
+            # Обычный лайк
+            await callback.message.answer(
+                "👍 Вы отметили этого пользователя. Если он также отметит вас, вы сможете начать общение.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]
+                ])
+            )
+        
     except Exception as e:
-        logger.error(f"Ошибка при обработке дизлайка: {e}")
-        await callback.answer("Произошла ошибка, попробуйте позже.", show_alert=True)
+        logger.error(f"Ошибка при обработке лайка: {e}", exc_info=True)
+        await callback.answer("Произошла ошибка. Пожалуйста, попробуйте еще раз.")
 
 @router.callback_query(F.data.startswith("like_back:"))
-async def like_back_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
-    """Обработчик лайка в ответ"""
-    await callback.answer("❤️")
-    
-    # Извлекаем ID пользователя из callback_data
-    liked_user_id = int(callback.data.split(":")[1])
-    
+async def like_back_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    """Обработчик для ответного лайка"""
     try:
+        # Получаем ID пользователя из callback_data
+        user_id = int(callback.data.split(':')[1])
+        
         # Добавляем лайк в базу данных
-        like_id = await db.add_like(callback.from_user.id, liked_user_id)
+        like_result = await db.add_like(callback.from_user.id, user_id)
         
-        if like_id:
-            logger.info(f"Пользователь {callback.from_user.id} лайкнул {liked_user_id} в ответ")
+        # Проверяем, есть ли взаимные лайки (должны быть, так как это ответный лайк)
+        mutual_like = await db.check_mutual_like(callback.from_user.id, user_id)
+        
+        # Удаляем текущее сообщение
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logger.error(f"Ошибка удаления сообщения: {e}")
+        
+        # Отправляем уведомления о взаимной симпатии
+        if mutual_like:
+            logger.info(f"Отправка уведомлений о взаимной симпатии между {callback.from_user.id} и {user_id}")
             
-            # Проверяем на взаимный лайк (должен быть True, так как это ответный лайк)
-            is_mutual = await db.check_mutual_like(callback.from_user.id, liked_user_id)
+            # Получаем профили пользователей
+            user1_profile = await db.get_user_profile(callback.from_user.id)
+            user2_profile = await db.get_user_profile(user_id)
             
-            # Отправляем уведомление о лайке
-            await send_like_notification(
-                callback.bot, 
-                callback.from_user.id,
-                liked_user_id,
-                db,
-                crypto
-            )
-            
-            # Показываем сообщение о взаимной симпатии
-            if is_mutual:
+            if user1_profile and user2_profile:
+                # Отправляем уведомление первому пользователю
                 await callback.message.answer(
-                    "❤️ У вас взаимная симпатия! Теперь вы можете продолжить общение."
+                    f"🎉 У вас взаимная симпатия с {user2_profile['name']}!\n"
+                    f"Теперь вы можете начать общение: @{user2_profile.get('username', 'пользователь')}"
                 )
+                
+                # Отправляем уведомление второму пользователю
+                try:
+                    await callback.bot.send_message(
+                        user_id,
+                        f"🎉 У вас взаимная симпатия с {user1_profile['name']}!\n"
+                        f"Теперь вы можете начать общение: @{user1_profile.get('username', 'пользователь')}"
+                    )
+                    logger.info("Уведомления о взаимной симпатии успешно отправлены")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке уведомления о взаимной симпатии: {e}")
         
-        # Обновляем текущий профиль, чтобы показать взаимную симпатию
-        await show_like_profile(callback.message, state, db, crypto)
+        # Отправляем сообщение о успешном лайке и предлагаем продолжить просмотр лайков
+        await callback.message.answer(
+            "Вы поставили лайк этому пользователю! Это взаимная симпатия! 🎉",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="Продолжить просмотр лайков", 
+                    callback_data="view_likes"
+                )],
+                [InlineKeyboardButton(
+                    text="◀️ Назад в главное меню", 
+                    callback_data="back_to_menu"
+                )]
+            ])
+        )
         
     except Exception as e:
-        logger.error(f"Ошибка при добавлении лайка в ответ: {e}")
-        await callback.answer("Произошла ошибка. Попробуйте позже.", show_alert=True)
+        logger.error(f"Ошибка при обработке ответного лайка: {e}", exc_info=True)
+        await callback.answer("Произошла ошибка. Пожалуйста, попробуйте еще раз.")
+
+@router.callback_query(F.data.startswith("dislike_user:"))
+async def dislike_user_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    """Обработчик для дизлайка пользователя"""
+    try:
+        # Получаем ID пользователя из callback_data
+        user_id = int(callback.data.split(':')[1])
+        
+        # Отмечаем лайк как просмотренный
+        await db.mark_likes_as_viewed(user_id, callback.from_user.id)
+        
+        # Удаляем текущее сообщение
+        await callback.message.delete()
+        
+        # Отправляем новое сообщение вместо редактирования
+        await callback.message.answer(
+            "Вы отклонили этого пользователя.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="Вернуться к просмотру лайков", 
+                    callback_data="view_likes"
+                )],
+                [InlineKeyboardButton(
+                    text="◀️ Назад в главное меню", 
+                    callback_data="back_to_menu"
+                )]
+            ])
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при обработке дизлайка: {e}", exc_info=True)
+        await callback.answer("Произошла ошибка. Пожалуйста, попробуйте еще раз.")
 
 # Обработчик для поиска совместимых пользователей
 @router.callback_query(F.data == "find_compatible")
@@ -444,7 +666,6 @@ async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db
         logger.error(f"Error in find_compatible_handler: {e}")
         await callback.message.answer("⚠️ Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-
 async def find_compatible_users(self, user_id: int, **filters):
     """Поиск совместимых пользователей с учетом приоритета"""
     try:
@@ -487,7 +708,6 @@ async def find_compatible_users(self, user_id: int, **filters):
     except Exception as e:
         logger.error(f"Error finding compatible users: {e}")
         return []
-
 
 async def check_expired_services(self):
     """Проверяет и деактивирует просроченные услуги"""
@@ -616,69 +836,6 @@ async def next_compatible_handler(callback: CallbackQuery, state: FSMContext, db
     # Показываем следующего пользователя - ВАЖНО: передаем crypto
     await show_compatible_user(callback.message, state, db, crypto)
 
-# Обработчик для лайка пользователя
-@router.callback_query(F.data.startswith("like_user_"))
-async def like_user_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
-    """Обработчик лайка пользователя"""
-    await callback.answer("❤️")
-    
-    # Извлекаем ID пользователя из callback_data
-    liked_user_id = int(callback.data.split("_")[2])
-    
-    try:
-        # Добавляем лайк в базу данных
-        like_id = await db.add_like(callback.from_user.id, liked_user_id)
-        
-        if like_id:
-            logger.info(f"Пользователь {callback.from_user.id} лайкнул {liked_user_id}")
-            
-            # Проверяем на взаимный лайк
-            is_mutual = await db.check_mutual_like(callback.from_user.id, liked_user_id)
-            
-            # Отправляем уведомление о лайке
-            await send_like_notification(
-                callback.bot, 
-                callback.from_user.id,
-                liked_user_id,
-                db,
-                crypto
-            )
-            
-            # Если это взаимный лайк, показываем особое сообщение
-            if is_mutual:
-                await callback.message.answer(
-                    "❤️ У вас взаимная симпатия! Теперь вы можете начать общение.",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="💬 Написать сообщение", 
-                            url=f"tg://user?id={liked_user_id}"
-                        )]
-                    ])
-                )
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении лайка: {e}")
-    
-    # Получаем данные из состояния
-    state_data = await state.get_data()
-    current_index = state_data.get("current_compatible_index", 0)
-    compatible_users = state_data.get("compatible_users", [])
-    
-    # Увеличиваем индекс для перехода к следующей анкете
-    current_index += 1
-    
-    # Если дошли до конца списка, начинаем сначала
-    if current_index >= len(compatible_users):
-        current_index = 0
-    
-    # Обновляем индекс в состоянии
-    await state.update_data(current_compatible_index=current_index)
-    
-    # Удаляем предыдущее сообщение
-    await delete_message_safely(callback.message)
-    
-    # Показываем следующего пользователя
-    await show_compatible_user(callback.message, state, db, crypto)
-
 # Обработчики фильтров
 @router.callback_query(F.data == "filter_city")
 async def filter_city_handler(callback: CallbackQuery, state: FSMContext):
@@ -805,19 +962,32 @@ async def next_like_handler(callback: CallbackQuery, state: FSMContext, db: Data
     """Обработчик перехода к следующему лайку"""
     await callback.answer()
     
-    state_data = await state.get_data()
-    current_index = state_data.get("current_like_index", 0) + 1
-    likes_list = state_data.get("likes_list", [])
-    
-    if current_index >= len(likes_list):
-        await callback.message.edit_text(
-            "Вы просмотрели все лайки!",
+    try:
+        # Получаем данные из состояния
+        data = await state.get_data()
+        likes_list = data.get("likes_list", [])
+        current_index = data.get("current_like_index", 0)
+        
+        if current_index >= len(likes_list):
+            # Больше лайков нет
+            await callback.message.answer(
+                "Больше лайков нет.",
+                reply_markup=back_to_menu_button()
+            )
+            return
+        
+        # Удаляем текущее сообщение
+        await delete_message_safely(callback.message)
+        
+        # Показываем следующий профиль
+        await show_like_profile(callback.message, callback.from_user.id, state, db, crypto)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при переходе к следующему лайку: {e}", exc_info=True)
+        await callback.message.answer(
+            "Произошла ошибка. Пожалуйста, попробуйте позже.",
             reply_markup=back_to_menu_button()
         )
-        return
-    
-    await state.update_data(current_like_index=current_index)
-    await show_like_profile(callback.message, state, db, crypto)
 
 @router.callback_query(F.data == "prev_like")
 async def prev_like_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
@@ -833,7 +1003,7 @@ async def prev_like_handler(callback: CallbackQuery, state: FSMContext, db: Data
         await state.update_data(current_like_index=current_index)
         
         # Показываем предыдущий профиль
-        await show_like_profile(callback.message, state, db, crypto)
+        await show_like_profile(callback.message, callback.from_user.id, state, db, crypto)
     else:
         await callback.answer("Это первый лайк в списке", show_alert=True)
 

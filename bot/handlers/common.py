@@ -54,31 +54,43 @@ async def cmd_cancel(message: Message, state: FSMContext, db: Database):
     likes_count = await db.get_unviewed_likes_count(message.from_user.id)
     await show_main_menu(message, state, likes_count)
 
-# Обработчик возврата в меню
 @router.callback_query(F.data == "back_to_menu")
-async def back_to_menu_handler(callback: CallbackQuery, db: Database):
+async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     """Универсальный обработчик возврата в меню"""
+    await callback.answer()
+    
     try:
+        # Получаем количество непросмотренных лайков
         unviewed_likes = await db.get_unviewed_likes_count(callback.from_user.id)
         
-        # Проверяем тип сообщения
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption="🔹 Главное меню 🔹",
-                reply_markup=main_menu(unviewed_likes)
-            )
-        else:
-            await callback.message.edit_text(
-                "🔹 Главное меню 🔹",
-                reply_markup=main_menu(unviewed_likes)
-            )
-    except Exception as e:
-        logger.error(f"Ошибка в back_to_menu_handler: {e}")
-        # Если не получилось отредактировать, отправляем новое сообщение
+        # Удаляем текущее сообщение
+        await callback.message.delete()
+        
+        # Отправляем новое сообщение с главным меню
         await callback.message.answer(
             "🔹 Главное меню 🔹",
             reply_markup=main_menu(unviewed_likes)
         )
+        
+        # Очищаем состояние
+        await state.clear()
+        
+    except Exception as e:
+        logger.error(f"Ошибка в back_to_menu_handler: {e}")
+        # Если не получилось удалить сообщение, отправляем новое
+        try:
+            unviewed_likes = await db.get_unviewed_likes_count(callback.from_user.id)
+        except:
+            unviewed_likes = 0
+            
+        await callback.message.answer(
+            "🔹 Главное меню 🔹",
+            reply_markup=main_menu(unviewed_likes)
+        )
+        
+        # Очищаем состояние
+        await state.clear()
+
 
 # Общая функция показа главного меню
 async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, likes_count: int = 0):
