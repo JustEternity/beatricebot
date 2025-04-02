@@ -15,10 +15,31 @@ def policy_keyboard() -> ReplyKeyboardMarkup:
         one_time_keyboard=True
     )
 
+
+def services_keyboard(services=None) -> InlineKeyboardMarkup:
+    """Клавиатура для просмотра услуг"""
+    buttons = []
+
+    # Если есть услуги, добавляем кнопки для каждой услуги
+    if services:
+        for service in services:
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"{service['description']} - {service['cost']} руб.",
+                    callback_data=f"service_info_{service['serviceid']}"
+                )
+            ])
+
+    # Добавляем кнопку возврата в меню
+    buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def main_menu(likes_count=0) -> InlineKeyboardMarkup:
     """Инлайн-клавиатура главного меню с количеством лайков"""
     likes_text = f"❤️ Лайки ({likes_count})" if likes_count > 0 else "❤️ Лайки"
-    
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👤 Моя анкета", callback_data="view_profile")],
@@ -26,6 +47,7 @@ def main_menu(likes_count=0) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")],
             [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")],
             [InlineKeyboardButton(text="💎 Подписка", callback_data="subscription_info")],
+            [InlineKeyboardButton(text="🛒 Услуги", callback_data="view_services")],
             [InlineKeyboardButton(text="Обратная связь", callback_data="send_feedback")]
         ]
     )

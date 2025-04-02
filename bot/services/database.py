@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import asyncpg
 import logging
 from datetime import datetime, timedelta
@@ -774,4 +776,478 @@ class Database:
                 """, sender_id, receiver_id)
         except Exception as e:
             logger.error(f"Ошибка проверки лайка: {e}")
+            return False
+
+    async def get_all_services(self):
+        """Получает список всех доступных услуг"""
+        logger.debug("Fetching all services")
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                    SELECT 
+                        serviceid, 
+                        cost, 
+                        serviceduration, 
+                        description, 
+                        priorityboostvalue, 
+                        availabilitystatus 
+                    FROM servicetypes 
+                    ORDER BY cost ASC
+                """
+                rows = await conn.fetch(query)
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error fetching services: {e}")
+            return []
+
+    async def get_service_by_id(self, service_id: int):
+        """Получает информацию об услуге по ID"""
+        logger.debug(f"Fetching service with ID {service_id}")
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                    SELECT 
+                        serviceid, 
+                        cost, 
+                        serviceduration, 
+                        description, 
+                        priorityboostvalue, 
+                        availabilitystatus 
+                    FROM servicetypes 
+                    WHERE serviceid = $1
+                """
+                row = await conn.fetchrow(query, service_id)
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error fetching service {service_id}: {e}")
+            return None
+
+    async def activate_service(self, user_id: int, service_id: int) -> bool:
+        """Активирует услугу для пользователя"""
+        logger.info(f"Activating service {service_id} for user {user_id}")
+        try:
+            async with self.pool.acquire() as conn:
+                # Получаем информацию об услуге
+                service = await self.get_service_by_id(service_id)
+                if not service:
+                    logger.error(f"Service {service_id} not found")
+                    return False
+
+                # Создаем запись о покупке
+                payment_id = int(datetime.now().timestamp() * 1000)
+
+                # Вычисляем дату окончания услуги
+                end_date = (
+                    datetime.now() + service['serviceduration']
+                    if service['serviceduration']
+                    else datetime.now() + timedelta(days=30)
+                )
+
+                # Вставляем запись о покупке услуги
+                await conn.execute(
+                    """
+                    INSERT INTO purchasedservices (
+                        usertelegramid, 
+                        serviceid, 
+                        serviceenddate, 
+                        paymentstatus, 
+                        paymentid
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    user_id,
+                    service_id,
+                    end_date,
+                    True,
+                    payment_id
+                )
+
+                # Если это услуга с повышением приоритета
+                if service['priorityboostvalue'] > 0:
+                    await conn.execute(
+                        """
+                        UPDATE users
+                        SET profileprioritycoefficient = profileprioritycoefficient + $1
+                        WHERE telegramid = $2
+                        """,
+                        service['priorityboostvalue'] / 100.0,  # Преобразуем процент в коэффициент
+                        user_id
+                    )
+
+                return True
+        except Exception as e:
+            logger.error(f"Error activating service {service_id} for user {user_id}: {e}")
+            logger.exception(e)
+            return False
+
+    async def get_user_services(self, user_id: int):
+        """Получает список активных услуг пользователя"""
+        logger.debug(f"Fetching active services for user {user_id}")
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                    SELECT 
+                        ps.recordid, 
+                        ps.serviceid, 
+                        ps.serviceenddate, 
+                        ps.paymentstatus,
+                        st.description, 
+                        st.cost, 
+                        st.priorityboostvalue
+                    FROM purchasedservices ps
+                    JOIN servicetypes st ON ps.serviceid = st.serviceid
+                    WHERE 
+                        ps.usertelegramid = $1 AND 
+                        ps.serviceenddate > NOW() AND 
+                        ps.paymentstatus = true
+                    ORDER BY ps.serviceenddate DESC
+                """
+                rows = await conn.fetch(query, user_id)
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error fetching user services for {user_id}: {e}")
+            return []
+
+    async def get_active_services(self, user_id: int) -> List[Dict]:
+        """Получает список активных услуг пользователя"""
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                    SELECT ps.serviceid, st.description, st.priorityboostvalue, 
+                           ps.serviceenddate, ps.paymentstatus
+                    FROM purchasedservices ps
+                    JOIN servicetypes st ON ps.serviceid = st.serviceid
+                    WHERE ps.usertelegramid = $1 
+                    AND ps.serviceenddate > NOW()
+                    AND ps.paymentstatus = TRUE
+                    ORDER BY ps.serviceenddate DESC
+                """
+                rows = await conn.fetch(query, user_id)
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting active services for user {user_id}: {e}")
+            return []
+
+    async def calculate_priority_coefficient(self, user_id: int) -> float:
+        """Рассчитывает общий коэффициент приоритета пользователя"""
+        base_coefficient = 1.0  # Базовый коэффициент
+        try:
+            async with self.pool.acquire() as conn:
+                # Получаем активные услуги пользователя
+                query = """
+                    SELECT st.priorityboostvalue
+                    FROM purchasedservices ps
+                    JOIN servicetypes st ON ps.serviceid = st.serviceid
+                    WHERE ps.usertelegramid = $1
+                    AND ps.serviceenddate > NOW()
+                    AND ps.paymentstatus = TRUE
+                """
+                rows = await conn.fetch(query, user_id)
+
+                # Суммируем бонусы от всех активных услуг
+                total_boost = sum(
+                    row['priorityboostvalue'] / 100.0  # Преобразуем проценты в коэффициент
+                    for row in rows
+                )
+
+                final_coefficient = base_coefficient + total_boost
+                logger.debug(f"Calculated priority coefficient for user {user_id}: {final_coefficient}")
+                return final_coefficient
+        except Exception as e:
+            logger.error(f"Error calculating priority for user {user_id}: {e}")
+            return base_coefficient
+
+    async def update_user_priority(self, user_id: int) -> bool:
+        """Обновляет коэффициент приоритета пользователя"""
+        try:
+            new_coefficient = await self.calculate_priority_coefficient(user_id)
+
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET profileprioritycoefficient = $1 WHERE telegramid = $2",
+                    new_coefficient, user_id
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Error updating priority for user {user_id}: {e}")
+            return False
+
+    async def activate_service(self, user_id: int, service_id: int) -> bool:
+        """Активирует услугу для пользователя и обновляет коэффициент приоритета"""
+        logger.info(f"Activating service {service_id} for user {user_id}")
+        try:
+            async with self.pool.acquire() as conn:
+                # Проверяем, есть ли уже активная услуга с таким ID у пользователя
+                active_service = await conn.fetchrow(
+                    """
+                    SELECT * FROM purchasedservices 
+                    WHERE usertelegramid = $1 
+                    AND serviceid = $2 
+                    AND serviceenddate > NOW() 
+                    AND paymentstatus = TRUE
+                    """,
+                    user_id,
+                    service_id
+                )
+
+                if active_service:
+                    logger.warning(f"User {user_id} already has active service {service_id}")
+                    return False
+
+                # Получаем информацию об услуге
+                service = await self.get_service_by_id(service_id)
+                if not service:
+                    logger.error(f"Service {service_id} not found")
+                    return False
+
+                # Создаем запись о покупке
+                payment_id = int(datetime.now().timestamp() * 1000)
+
+                # Вычисляем дату окончания услуги
+                # Проверяем тип serviceduration
+                logger.debug(
+                    f"Service duration type: {type(service['serviceduration'])}, value: {service['serviceduration']}")
+
+                if service['serviceduration'] is None:
+                    # Если длительность не указана, используем 30 дней по умолчанию
+                    end_date = datetime.now() + timedelta(days=30)
+                elif isinstance(service['serviceduration'], timedelta):
+                    # Если это уже timedelta, используем его напрямую
+                    end_date = datetime.now() + service['serviceduration']
+                elif isinstance(service['serviceduration'], int):
+                    # Если это число, используем его как количество дней
+                    end_date = datetime.now() + timedelta(days=service['serviceduration'])
+                else:
+                    # Для других типов пробуем преобразовать в int
+                    try:
+                        days = int(service['serviceduration'])
+                        end_date = datetime.now() + timedelta(days=days)
+                    except (ValueError, TypeError):
+                        # Если не удалось преобразовать, используем 30 дней по умолчанию
+                        logger.warning(
+                            f"Could not convert service duration to days: {service['serviceduration']}, using default 30 days")
+                        end_date = datetime.now() + timedelta(days=30)
+
+                logger.debug(f"Calculated end date: {end_date}")
+
+                # Вставляем запись о покупке услуги
+                await conn.execute(
+                    """
+                    INSERT INTO purchasedservices (
+                        usertelegramid, 
+                        serviceid, 
+                        serviceenddate, 
+                        paymentstatus, 
+                        paymentid
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    user_id,
+                    service_id,
+                    end_date,
+                    True,
+                    payment_id
+                )
+
+                # Если это услуга с повышением приоритета
+                if service['priorityboostvalue'] > 0:
+                    # Получаем текущий коэффициент пользователя
+                    current_coefficient = await conn.fetchval(
+                        "SELECT profileprioritycoefficient FROM users WHERE telegramid = $1",
+                        user_id
+                    )
+
+                    if current_coefficient is None:
+                        current_coefficient = Decimal('1.0')
+
+                    # Преобразуем в Decimal для безопасных операций
+                    if not isinstance(current_coefficient, Decimal):
+                        current_coefficient = Decimal(str(current_coefficient))
+
+                    # Вычисляем новый коэффициент
+                    boost_value = service['priorityboostvalue'] / Decimal('100')
+                    new_coefficient = current_coefficient + boost_value
+
+                    # Округляем до 2 знаков после запятой
+                    new_coefficient = new_coefficient.quantize(Decimal('0.01'))
+
+                    # Проверяем, не превышает ли новый коэффициент максимальное значение
+                    if new_coefficient > Decimal('999.99'):
+                        new_coefficient = Decimal('999.99')
+                        logger.warning(f"Priority coefficient for user {user_id} capped at 999.99")
+
+                    # Обновляем коэффициент в таблице users
+                    await conn.execute(
+                        """
+                        UPDATE users
+                        SET profileprioritycoefficient = $1
+                        WHERE telegramid = $2
+                        """,
+                        new_coefficient,
+                        user_id
+                    )
+
+                    logger.info(
+                        f"Updated priority coefficient for user {user_id}: {current_coefficient} -> {new_coefficient}")
+
+                # Обновляем статус подписки, если это подписка
+                if service_id == 1:  # Предполагаем, что ID 1 - это подписка
+                    await conn.execute(
+                        """
+                        UPDATE users
+                        SET subscriptionstatus = TRUE
+                        WHERE telegramid = $1
+                        """,
+                        user_id
+                    )
+
+                return True
+        except Exception as e:
+            logger.error(f"Error activating service {service_id} for user {user_id}: {e}")
+            logger.exception(e)
+            return False
+
+    async def fix_priority_coefficient(self, user_id: int) -> bool:
+        """Исправляет коэффициент приоритета пользователя на основе активированных услуг"""
+        logger.info(f"Fixing priority coefficient for user {user_id}")
+        try:
+            async with self.pool.acquire() as conn:
+                # Получаем базовый коэффициент (обычно 1.0)
+                base_coefficient = Decimal('1.0')
+
+                # Получаем сумму коэффициентов всех активных услуг пользователя
+                query = """
+                SELECT COALESCE(SUM(st.priorityboostvalue / 100.0), 0) as total_coefficient
+                FROM purchasedservices ps
+                JOIN servicetypes st ON ps.serviceid = st.serviceid
+                WHERE ps.usertelegramid = $1 
+                AND ps.serviceenddate > NOW() 
+                AND ps.paymentstatus = TRUE
+                """
+
+                try:
+                    result = await conn.fetchval(query, user_id)
+                    if result is None:
+                        total_service_coefficient = Decimal('0')
+                    else:
+                        # Преобразуем результат в Decimal
+                        total_service_coefficient = Decimal(str(result))
+                except Exception as e:
+                    logger.error(f"Error in query for priority coefficient: {e}")
+                    # Проверяем структуру таблиц
+                    tables = await conn.fetch(
+                        """
+                        SELECT table_name 
+                        FROM information_schema.tables 
+                        WHERE table_schema = 'public'
+                        """
+                    )
+                    logger.debug(f"Available tables: {[t['table_name'] for t in tables]}")
+
+                    # Если таблица purchasedservices существует, проверим ее структуру
+                    if any(t['table_name'] == 'purchasedservices' for t in tables):
+                        columns = await conn.fetch(
+                            """
+                            SELECT column_name, data_type
+                            FROM information_schema.columns
+                            WHERE table_name = 'purchasedservices'
+                            """
+                        )
+                        logger.debug(f"purchasedservices columns: {columns}")
+
+                    # Используем значение по умолчанию
+                    total_service_coefficient = Decimal('0')
+
+                # Вычисляем итоговый коэффициент
+                final_coefficient = base_coefficient + total_service_coefficient
+
+                # Округляем до 2 знаков после запятой
+                final_coefficient = final_coefficient.quantize(Decimal('0.01'))
+
+                # Проверяем, не превышает ли новый коэффициент максимальное значение
+                if final_coefficient > Decimal('999.99'):
+                    final_coefficient = Decimal('999.99')
+                    logger.warning(f"Priority coefficient for user {user_id} capped at 999.99")
+
+                # Обновляем коэффициент в таблице users
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET profileprioritycoefficient = $1
+                    WHERE telegramid = $2
+                    """,
+                    final_coefficient,
+                    user_id
+                )
+
+                logger.info(f"Fixed priority coefficient for user {user_id}: {final_coefficient}")
+                return True
+        except Exception as e:
+            logger.error(f"Error fixing priority coefficient for user {user_id}: {e}")
+            logger.exception(e)
+            return False
+
+    async def update_subscription_status(self, user_id: int) -> bool:
+        """Обновляет статус подписки пользователя на основе активных услуг"""
+        try:
+            async with self.pool.acquire() as conn:
+                # Проверяем наличие активной подписки
+                has_subscription = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM purchasedservices
+                        WHERE usertelegramid = $1
+                        AND serviceid = 1
+                        AND serviceenddate > NOW()
+                        AND paymentstatus = TRUE
+                    )
+                    """,
+                    user_id
+                )
+
+                # Обновляем статус подписки в таблице users
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET subscriptionstatus = $1
+                    WHERE telegramid = $2
+                    """,
+                    has_subscription, user_id
+                )
+
+                logger.info(f"Updated subscription status to {has_subscription} for user {user_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Error updating subscription status for user {user_id}: {e}")
+            return False
+
+    async def fix_priority_coefficient(self, user_id: int) -> bool:
+        """Исправляет коэффициент приоритета пользователя на основе активированных услуг"""
+        try:
+            async with self.pool.acquire() as conn:
+                # Получаем базовый коэффициент (обычно 1.0)
+                base_coefficient = 1.0
+
+                # Получаем сумму коэффициентов всех активных услуг пользователя
+                query = """
+                SELECT COALESCE(SUM(s.priority_coefficient), 0) as total_coefficient
+                FROM user_services us
+                JOIN services s ON us.service_id = s.id
+                WHERE us.user_id = $1 AND us.is_active = TRUE
+                """
+                result = await conn.fetchrow(query, user_id)
+                total_service_coefficient = result['total_coefficient'] if result else 0
+
+                # Вычисляем итоговый коэффициент
+                final_coefficient = base_coefficient + total_service_coefficient
+
+                # Обновляем коэффициент в таблице users
+                update_query = """
+                UPDATE users 
+                SET profileprioritycoefficient = $1 
+                WHERE id = $2
+                """
+                await conn.execute(update_query, final_coefficient, user_id)
+
+                return True
+        except Exception as e:
+            logger.error(f"Error fixing priority coefficient: {e}")
             return False

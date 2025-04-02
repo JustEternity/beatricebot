@@ -16,6 +16,224 @@ import logging
 logger = logging.getLogger(__name__)
 router = Router()
 
+
+@router.callback_query(F.data == "view_services")
+async def view_services_handler(callback: CallbackQuery, db, state: FSMContext):
+    """Обработчик для просмотра доступных услуг"""
+    user_id = callback.from_user.id
+    logger.debug(f"Получен callback_data: {callback.data}")
+
+    # Обновляем статус подписки и приоритет пользователя
+    await db.update_subscription_status(user_id)
+    await db.update_user_priority(user_id)
+
+    # Создаем клавиатуру с тремя конкретными услугами
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Подписка на месяц", callback_data="service_1")],
+            [InlineKeyboardButton(text="🚀 Буст видимости на 24 часа", callback_data="service_2")],
+            [InlineKeyboardButton(text="🔥 Буст видимости на 7 дней", callback_data="service_3")],
+            [InlineKeyboardButton(text="📋 Мои активные услуги", callback_data="my_services")],
+            [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
+        ]
+    )
+
+    # Отправляем сообщение с клавиатурой
+    await callback.message.edit_text(
+        "📋 <b>Доступные услуги:</b>\n\n"
+        "Выберите интересующую вас услугу для получения подробной информации:",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data in ["service_1", "service_2", "service_3"])
+async def service_details_handler(callback: CallbackQuery, db, state: FSMContext):
+    """Обработчик для просмотра детальной информации об услуге"""
+    logger.debug(f"Получен callback_data: {callback.data}")
+    try:
+        service_id = int(callback.data.split("_")[1])
+        user_id = callback.from_user.id
+
+        # Исправляем коэффициент приоритета перед показом услуг
+        await db.fix_priority_coefficient(user_id)
+
+        # Получаем информацию об услуге из предопределенных данных
+        service_info = {
+            1: {
+                "id": 1,
+                "description": "Подписка на месяц",
+                "cost": 299,
+                "serviceduration": "30 дней",
+                "priorityboostvalue": 50,
+                "availabilitystatus": True,
+                "details": "Премиум подписка на месяц дает вам приоритет в поиске и доступ ко всем функциям приложения."
+            },
+            2: {
+                "id": 2,
+                "description": "Буст видимости на 24 часа",
+                "cost": 99,
+                "serviceduration": "24 часа",
+                "priorityboostvalue": 100,
+                "availabilitystatus": True,
+                "details": "Максимальное повышение видимости вашего профиля в течение 24 часов."
+            },
+            3: {
+                "id": 3,
+                "description": "Буст видимости на 7 дней",
+                "cost": 499,
+                "serviceduration": "7 дней",
+                "priorityboostvalue": 75,
+                "availabilitystatus": True,
+                "details": "Значительное повышение видимости вашего профиля в течение недели."
+            }
+        }
+
+        # Проверяем, есть ли такая услуга
+        if service_id not in service_info:
+            logger.warning(f"Service {service_id} not found")
+            await callback.answer("Услуга не найдена", show_alert=True)
+            return
+
+        service = service_info[service_id]
+
+        # Формируем детальное сообщение об услуге
+        message_text = (
+            f"<b>🔍 {service['description']}</b>\n\n"
+            f"{service['details']}\n\n"
+            f"💰 <b>Стоимость:</b> {service['cost']} руб.\n"
+            f"⏱ <b>Длительность:</b> {service['serviceduration']}\n"
+            f"🔝 <b>Повышение приоритета:</b> +{service['priorityboostvalue']}%\n\n"
+            f"Чтобы приобрести услугу, нажмите кнопку ниже."
+        )
+
+        # Создаем клавиатуру с кнопкой покупки и возврата
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Приобрести", callback_data=f"buy_service_{service_id}")],
+                [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
+                [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
+            ]
+        )
+
+        await callback.message.edit_text(
+            message_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in service_details handler: {e}", exc_info=True)
+        await callback.answer("Произошла ошибка при обработке запроса", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("buy_service_"))
+async def buy_service_handler(callback: CallbackQuery, db: Database, state: FSMContext):
+    """Обработчик покупки услуги"""
+    try:
+        service_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        # Активируем услугу
+        success = await db.activate_service(user_id, service_id)
+
+        if success:
+            # Дополнительно исправляем коэффициент для надежности
+            await db.fix_priority_coefficient(user_id)
+            # Получаем информацию об услуге для сообщения
+            service = await db.get_service_by_id(service_id)
+            service_name = service['description'] if service else "услуга"
+
+            # Получаем обновленную информацию о пользователе
+            user_data = await db.get_user(user_id)
+            priority_coefficient = user_data['profileprioritycoefficient'] if user_data else 1.0
+            subscription_status = user_data['subscriptionstatus'] if user_data else False
+
+            # Формируем сообщение с информацией о статусе
+            status_text = (
+                f"✅ Услуга «{service_name}» успешно активирована!\n\n"
+                f"📊 Ваш текущий приоритет: {priority_coefficient:.2f}\n"
+                f"🔑 Статус подписки: {'Активна ✅' if subscription_status else 'Неактивна ❌'}"
+            )
+
+            await callback.answer("✅ Услуга успешно активирована!", show_alert=True)
+
+            # Показываем сообщение с обновленным статусом
+            await callback.message.edit_text(
+                status_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📋 Мои услуги", callback_data="my_services")],
+                    [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")]
+                ])
+            )
+        else:
+            await callback.answer(
+                "⚠️ Не удалось активировать услугу. Попробуйте позже.",
+                show_alert=True
+            )
+    except Exception as e:
+        logger.error(f"Error in buy_service handler: {e}")
+        await callback.answer(
+            "Произошла ошибка при активации услуги",
+            show_alert=True
+        )
+
+
+
+async def update_all_users_priority(self):
+    """Обновляет коэффициенты приоритета для всех пользователей"""
+    logger.info("Updating priority coefficients for all users")
+    try:
+        async with self.pool.acquire() as conn:
+            # Получаем всех пользователей
+            users = await conn.fetch("SELECT telegramid FROM users")
+
+            updated_count = 0
+            for user in users:
+                user_id = user['telegramid']
+                success = await self.fix_priority_coefficient(user_id)
+                if success:
+                    updated_count += 1
+
+            logger.info(f"Updated priority coefficients for {updated_count}/{len(users)} users")
+            return updated_count
+    except Exception as e:
+        logger.error(f"Error updating all users priority: {e}")
+        logger.exception(e)
+        return 0
+
+
+@router.callback_query(F.data == "my_services")
+async def view_my_services(callback: CallbackQuery, db: Database):
+    """Показывает активные услуги пользователя"""
+    try:
+        services = await db.get_active_services(callback.from_user.id)
+
+        if not services:
+            text = "У вас нет активных услуг"
+        else:
+            text = "🎁 Ваши активные услуги:\n\n"
+            for service in services:
+                end_date = service['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+                text += (
+                    f"🔹 {service['description']}\n"
+                    f"   Приоритет: +{service['priorityboostvalue']}%\n"
+                    f"   Действует до: {end_date}\n\n"
+                )
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="view_services")]
+            ])
+        )
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error showing services: {e}")
+        await callback.answer("Ошибка при загрузке услуг", show_alert=True)
+
 # Функция для безопасного удаления сообщений
 async def delete_message_safely(message):
     """Безопасно удаляет сообщение с обработкой ошибок"""
@@ -421,6 +639,80 @@ async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db
     except Exception as e:
         logger.error(f"Error in find_compatible_handler: {e}")
         await callback.message.answer("⚠️ Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+
+async def find_compatible_users(self, user_id: int, **filters):
+    """Поиск совместимых пользователей с учетом приоритета"""
+    try:
+        # Получаем коэффициент приоритета текущего пользователя
+        user_priority = await self.get_user_priority(user_id)
+
+        # Базовый запрос
+        query = """
+            SELECT u.*, 
+                   (u.profileprioritycoefficient * $1) as search_priority
+            FROM users u
+            WHERE u.telegramid != $2
+            AND u.accountstatus = 'active'
+            AND u.moderationstatus = TRUE
+        """
+
+        params = [user_priority, user_id]
+
+        # Добавляем фильтры
+        if filters.get('city'):
+            query += " AND u.city = $3"
+            params.append(filters['city'])
+
+        if filters.get('age_min') and filters.get('age_max'):
+            query += " AND u.age BETWEEN $4 AND $5"
+            params.extend([filters['age_min'], filters['age_max']])
+
+        # Сортируем по приоритету
+        query += " ORDER BY search_priority DESC, u.lastactiondate DESC"
+
+        if filters.get('limit'):
+            query += " LIMIT $6"
+            params.append(filters['limit'])
+
+        async with self.pool.acquire() as conn:
+            users = await conn.fetch(query, *params)
+
+        return [dict(user) for user in users]
+
+    except Exception as e:
+        logger.error(f"Error finding compatible users: {e}")
+        return []
+
+
+async def check_expired_services(self):
+    """Проверяет и деактивирует просроченные услуги"""
+    try:
+        async with self.pool.acquire() as conn:
+            # Находим просроченные услуги
+            expired = await conn.fetch(
+                "SELECT usertelegramid FROM purchasedservices "
+                "WHERE serviceenddate <= NOW() AND paymentstatus = TRUE"
+            )
+
+            if not expired:
+                return 0
+
+            # Деактивируем их
+            await conn.execute(
+                "UPDATE purchasedservices SET paymentstatus = FALSE "
+                "WHERE serviceenddate <= NOW() AND paymentstatus = TRUE"
+            )
+
+            # Обновляем приоритеты для затронутых пользователей
+            for record in expired:
+                await self.update_user_priority(record['usertelegramid'])
+
+            return len(expired)
+
+    except Exception as e:
+        logger.error(f"Error checking expired services: {e}")
+        return 0
 
 # Функция для отображения совместимого пользователя
 async def show_compatible_user(message: Message, state: FSMContext, db: Database, crypto=None):
