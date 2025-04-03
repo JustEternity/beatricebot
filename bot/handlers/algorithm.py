@@ -10,7 +10,8 @@ from bot.services.algorithm_sovmest import CompatibilityService
 from bot.services.encryption import CryptoService
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from bot.services.utils import delete_previous_messages, format_profile_text, create_media_group
-from bot.keyboards.menus import compatible_navigation_keyboard, back_to_menu_button, subscription_keyboard, main_menu
+from bot.keyboards.menus import compatible_navigation_keyboard, back_to_menu_button, subscription_keyboard, main_menu, create_like_keyboard
+from bot.handlers.filtres import show_filters_menu
 import logging
 
 logger = logging.getLogger(__name__)
@@ -360,16 +361,6 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
             reply_markup=back_to_menu_button()
         )
 
-def create_like_keyboard(liker_id):
-    """Создает стандартную клавиатуру для просмотра лайков"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="❤️ Нравится", callback_data=f"like_back:{liker_id}"),
-            InlineKeyboardButton(text="👎 Не нравится", callback_data=f"dislike_user:{liker_id}")
-        ],
-        [InlineKeyboardButton(text="◀️ Назад в главное меню", callback_data="back_to_menu")]
-    ])
-
 async def handle_error(message: Message, text: str):
     try:
         await message.answer(text, reply_markup=back_to_menu_button())
@@ -712,9 +703,11 @@ async def dislike_user_handler(callback: CallbackQuery, state: FSMContext, db: D
 
 # Обработчик для поиска совместимых пользователей
 @router.callback_query(F.data == "find_compatible")
-async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
+async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    """Обработчик поиска совместимых пользователей"""
     try:
         await callback.answer()
+
         # Проверяем, прошел ли пользователь тест
         has_answers = await db.check_existing_answers(callback.from_user.id)
         if not has_answers:
@@ -728,38 +721,10 @@ async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db
             await state.update_data(last_message_id=msg.message_id)
             return
 
-        # Проверяем наличие подписки
-        has_subscription = await db.check_user_subscription(callback.from_user.id)
-        # Создаем клавиатуру с фильтрами
-        builder = InlineKeyboardBuilder()
-        # Базовые фильтры (доступны всем)
-        builder.button(text="📍 Город", callback_data="filter_city")
-        builder.button(text="🔢 Возраст", callback_data="filter_age")
-        # Дополнительные фильтры (только для подписчиков)
-        if has_subscription:
-            builder.button(text="👫 Пол", callback_data="filter_gender")
-            builder.button(text="💼 Род занятий", callback_data="filter_occupation")
-            builder.button(text="🎯 Цели знакомства", callback_data="filter_goals")
-        builder.button(text="🔍 Начать поиск", callback_data="start_search")
-        builder.button(text="◀️ Назад", callback_data="back_to_menu")
-        builder.adjust(2)  # По 2 кнопки в ряду
-        text = "⚙️ Выберите фильтры для поиска:" if has_subscription else "⚙️ Доступные фильтры (для подписки больше фильтров):"
+        await show_filters_menu(callback, state, db)
 
-        # Удаляем предыдущее сообщение если есть
-        data = await state.get_data()
-        if 'last_message_id' in data:
-            try:
-                await callback.bot.delete_message(callback.message.chat.id, data['last_message_id'])
-            except:
-                pass
-
-        msg = await callback.message.answer(
-            text,
-            reply_markup=builder.as_markup()
-        )
-        await state.update_data(last_message_id=msg.message_id)
     except Exception as e:
-        logger.error(f"Error in find_compatible_handler: {e}")
+        logger.error(f"Ошибка в find_compatible_handler: {e}")
         await callback.message.answer("⚠️ Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 async def find_compatible_users(self, user_id: int, **filters):
@@ -932,40 +897,6 @@ async def next_compatible_handler(callback: CallbackQuery, state: FSMContext, db
     # Показываем следующего пользователя - ВАЖНО: передаем crypto
     await show_compatible_user(callback.message, state, db, crypto)
 
-# Обработчики фильтров
-@router.callback_query(F.data == "filter_city")
-async def filter_city_handler(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Введите город для поиска:")
-    await state.set_state(RegistrationStates.SET_FILTER_CITY)
-    await callback.answer()
-
-@router.message(RegistrationStates.SET_FILTER_CITY)
-async def process_city_filter(message: Message, state: FSMContext):
-    is_valid, normalized_city = city_validator.validate_city(message.text)
-    if not is_valid:
-        await message.answer("⚠️ Город не найден. Пожалуйста, введите существующий российский город")
-        return
-    await state.update_data(filter_city=normalized_city)
-    await show_filters_menu(message, state)
-
-@router.callback_query(F.data == "filter_age")
-async def filter_age_handler(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Введите возрастной диапазон (например, 25-30):")
-    await state.set_state(RegistrationStates.SET_FILTER_AGE)
-    await callback.answer()
-
-@router.message(RegistrationStates.SET_FILTER_AGE)
-async def process_age_filter(message: Message, state: FSMContext):
-    try:
-        age_min, age_max = map(int, message.text.split('-'))
-        if 18 <= age_min <= age_max <= 100:
-            await state.update_data(filter_age_min=age_min, filter_age_max=age_max)
-            await show_filters_menu(message, state)
-        else:
-            await message.answer("⚠️ Возраст должен быть от 18 до 100 лет")
-    except:
-        await message.answer("⚠️ Неверный формат. Введите например: 25-30")
-
 # Обработчик начала поиска
 @router.callback_query(F.data == "start_search")
 async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
@@ -1005,28 +936,6 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
     # Показываем первого пользователя - ВАЖНО: передаем crypto
     await show_compatible_user(callback.message, state, db, crypto)
 
-async def show_filters_menu(message: Message, state: FSMContext, db=None):
-    """Показывает меню фильтров с текущими настройками"""
-    data = await state.get_data()
-    has_subscription = await db.check_user_subscription(message.from_user.id)
-    builder = InlineKeyboardBuilder()
-    # Добавляем кнопки фильтров с текущими значениями
-    city_text = f"📍 Город: {data.get('filter_city', 'любой')}"
-    age_text = f"🔢 Возраст: {data.get('filter_age_min', '18')}-{data.get('filter_age_max', '100')}"
-    builder.button(text=city_text, callback_data="filter_city")
-    builder.button(text=age_text, callback_data="filter_age")
-    if has_subscription:
-        # Доп фильтры для подписчиков
-        gender_text = f"👫 Пол: {data.get('filter_gender', 'любой')}"
-        builder.button(text=gender_text, callback_data="filter_gender")
-    builder.button(text="🔍 Начать поиск", callback_data="start_search")
-    builder.button(text="◀️ Назад", callback_data="back_to_menu")
-    builder.adjust(2)
-    await message.answer(
-        "⚙️ Текущие фильтры поиска:",
-        reply_markup=builder.as_markup()
-    )
-
 '''Обработчик кнопки назад на одну анкету'''
 @router.callback_query(F.data == "prev_compatible")
 async def prev_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
@@ -1046,7 +955,6 @@ async def prev_compatible_handler(callback: CallbackQuery, state: FSMContext, db
     await show_compatible_user(callback.message, state, db, crypto)
 
     # Добавьте этот обработчик в конец файла
-
 
 @router.callback_query(F.data == "next_like")
 async def next_like_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):

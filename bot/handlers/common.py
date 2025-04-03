@@ -3,6 +3,7 @@ from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, ReplyKeyb
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from bot.models.states import RegistrationStates
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.services.database import Database
 from bot.keyboards.menus import main_menu, back_to_menu_button as back, policy_keyboard, admin_menu
 from bot.services.utils import delete_previous_messages
@@ -169,6 +170,42 @@ async def update_main_menu(message, state: FSMContext, db: Database):
         "🔹 Главное меню 🔹",
         reply_markup=main_menu(likes_count)
     )
+
+async def show_filters_menu(callback: CallbackQuery, state: FSMContext, db: Database):
+    """Функция для показа меню фильтров"""
+    # Проверяем наличие подписки у пользователя
+    has_subscription = await db.check_user_subscription(callback.from_user.id)
+
+    # Создаем клавиатуру с фильтрами
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📍 Город", callback_data="filter_city")
+    builder.button(text="🔢 Возраст", callback_data="filter_age")
+
+    # Дополнительные фильтры для подписчиков
+    if has_subscription:
+        builder.button(text="💼 Род занятий", callback_data="filter_occupation")
+        builder.button(text="🎯 Цели знакомства", callback_data="filter_goals")
+
+    builder.button(text="🔍 Начать поиск", callback_data="start_search")
+    builder.button(text="◀️ Назад", callback_data="back_to_menu")
+    builder.adjust(2)  # По 2 кнопки в ряду
+
+    text = "⚙️ Выберите фильтры для поиска:" if has_subscription else \
+           "⚙️ Доступные фильтры (для подписки больше фильтров):"
+
+    # Удаляем предыдущее сообщение, если есть
+    data = await state.get_data()
+    if 'last_message_id' in data:
+        try:
+            await callback.bot.delete_message(callback.message.chat.id, data['last_message_id'])
+        except:
+            pass
+
+    msg = await callback.message.answer(
+        text,
+        reply_markup=builder.as_markup()
+    )
+    await state.update_data(last_message_id=msg.message_id)
 
 @router.callback_query(F.data == "send_feedback")
 async def send_feedback_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database, bot: Bot, s3: S3Service):

@@ -151,6 +151,16 @@ def compatible_navigation_keyboard(
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def create_like_keyboard(liker_id):
+    """Создает стандартную клавиатуру для просмотра лайков"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❤️ Нравится", callback_data=f"like_back:{liker_id}"),
+            InlineKeyboardButton(text="👎 Не нравится", callback_data=f"dislike_user:{liker_id}")
+        ],
+        [InlineKeyboardButton(text="◀️ Назад в главное меню", callback_data="back_to_menu")]
+    ])
+
 def subscription_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для активации подписки"""
     return InlineKeyboardMarkup(
