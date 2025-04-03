@@ -160,6 +160,34 @@ def create_like_keyboard(liker_id):
         [InlineKeyboardButton(text="◀️ Назад в главное меню", callback_data="back_to_menu")]
     ])
 
+def get_like_notification_keyboard(liker_id: int) -> InlineKeyboardMarkup:
+    # Создает клавиатуру для уведомления о лайке
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="👁️ Посмотреть",
+            callback_data=f"view_liker:{liker_id}"
+        )],
+        [InlineKeyboardButton(
+            text="◀️ В главное меню",
+            callback_data="back_to_menu"
+        )]
+    ])
+
+def get_match_notification_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    # Создает клавиатуру для уведомления о взаимной симпатии
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="💬 Начать общение",
+            url=f"tg://user?id={user_id}"
+        )],
+        [InlineKeyboardButton(
+            text="◀️ В меню",
+            callback_data="back_to_menu"
+        )]
+    ])
+
 def subscription_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для активации подписки"""
     return InlineKeyboardMarkup(

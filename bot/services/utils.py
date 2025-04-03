@@ -127,7 +127,6 @@ def standardize_gender(gender_value):
     else:
         return '1'  # Возвращаем строку
 
-
 def handle_errors(func):
     """Декоратор для обработки ошибок"""
     async def wrapper(*args, **kwargs):
