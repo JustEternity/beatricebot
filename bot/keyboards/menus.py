@@ -15,7 +15,6 @@ def policy_keyboard() -> ReplyKeyboardMarkup:
         one_time_keyboard=True
     )
 
-
 def services_keyboard(services=None) -> InlineKeyboardMarkup:
     """Клавиатура для просмотра услуг"""
     buttons = []
@@ -35,6 +34,18 @@ def services_keyboard(services=None) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def admin_menu() -> InlineKeyboardMarkup:
+    """Инлайн-клавиатура админского меню"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Модерации", callback_data="admin_moderations")],
+            [InlineKeyboardButton(text="Верификации", callback_data="admin_verifications")],
+            [InlineKeyboardButton(text="Жалобы", callback_data="admin_complaints")],
+            [InlineKeyboardButton(text="Обратная связь", callback_data="admin_feedback")],
+            [InlineKeyboardButton(text="Отчеты", callback_data="admin_reports")],
+            [InlineKeyboardButton(text="В режим пользователя", callback_data="back_to_menu")]
+        ]
+    )
 
 def main_menu(likes_count=0) -> InlineKeyboardMarkup:
     """Инлайн-клавиатура главного меню с количеством лайков"""
@@ -117,27 +128,27 @@ def compatible_navigation_keyboard(
 ) -> InlineKeyboardMarkup:
     """Клавиатура с обязательными кнопками 'Лайк' и 'Пропустить'"""
     buttons = []
-    
+
     # Основной ряд
     main_buttons = []
-    
+
     # Кнопка "Назад" (показываем всегда, кроме первой анкеты)
     if not is_first:
         main_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="prev_compatible"))
-    
+
     # Кнопка "Лайк" - всегда показываем
     if user_id:
         main_buttons.append(InlineKeyboardButton(text="❤️ Лайк", callback_data=f"like_user_{user_id}"))
-    
+
     # Кнопка "Пропустить" - всегда показываем, независимо от позиции анкеты
     main_buttons.append(InlineKeyboardButton(text="👎 Пропустить", callback_data="next_compatible"))
-    
+
     if main_buttons:
         buttons.append(main_buttons)
-    
+
     # Кнопка возврата в меню (всегда)
     buttons.append([InlineKeyboardButton(text="◀️ В меню", callback_data="back_to_menu")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def subscription_keyboard() -> InlineKeyboardMarkup:

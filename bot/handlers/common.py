@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from bot.models.states import RegistrationStates
 from bot.services.database import Database
-from bot.keyboards.menus import main_menu, back_to_menu_button as back, policy_keyboard
+from bot.keyboards.menus import main_menu, back_to_menu_button as back, policy_keyboard, admin_menu
 from bot.services.utils import delete_previous_messages
 from bot.services.encryption import CryptoService
 from bot.texts.textforbot import POLICY_TEXT
@@ -13,6 +13,83 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# Обработчик /admin для перехода в админское меню
+@router.message(Command("admin"))
+async def admin_menu_handler(message: Message, state: FSMContext, db: Database):
+    # Проверяем, является ли пользователь администратором
+    admin_password = await db.get_admin_pass(message.from_user.id)
+
+    if not admin_password:
+        await message.answer("❌ Вы не администратор.")
+        await show_main_menu(message, state)
+        return
+
+    # Если пользователь админ, запрашиваем пароль
+    auth_message = await message.answer("Введите пароль администратора:")
+
+    # Сохраняем ID сообщения с запросом пароля и пароль админа в state
+    await state.update_data(
+        auth_message_id=auth_message.message_id,
+        admin_password=admin_password
+    )
+
+    # Переходим в состояние ожидания ввода пароля
+    await state.set_state(RegistrationStates.ADMIN_AUTH)
+
+@router.message(RegistrationStates.ADMIN_AUTH)
+async def check_admin_password(message: Message, state: FSMContext, db: Database):
+    # Получаем введенный пароль
+    password = message.text
+
+    # Получаем данные из state
+    data = await state.get_data()
+    auth_message_id = data.get("auth_message_id")
+    admin_password = data.get("admin_password")  # Получаем пароль из state
+
+    # Пытаемся удалить сообщение с паролем
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.error(f"Не удалось удалить сообщение с паролем: {e}")
+
+    # Пытаемся удалить сообщение с запросом пароля
+    if auth_message_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=auth_message_id)
+        except Exception as e:
+            logger.error(f"Не удалось удалить сообщение с запросом пароля: {e}")
+
+    # Проверяем пароль
+    if password == admin_password:
+        # Если пароль верный, показываем админское меню
+        await show_admin_menu(message, state)
+    else:
+        # Если пароль неверный, отправляем сообщение об ошибке
+        error_message = await message.answer("❌ Неверный пароль. Доступ запрещен.")
+
+        # Возвращаемся в обычное меню
+        await show_main_menu(message, state)
+
+# Общая функция показа главного меню админа
+async def show_admin_menu(source: Message | CallbackQuery, state: FSMContext):
+    await delete_previous_messages(source, state)
+
+    # Определяем, как отправить сообщение в зависимости от типа source
+    if isinstance(source, Message):
+        menu_message = await source.answer(
+            "🔹Главное меню администратора🔹",
+            reply_markup=admin_menu()
+        )
+    else:  # CallbackQuery
+        menu_message = await source.message.answer(
+            "🔹Главное меню администратора🔹",
+            reply_markup=admin_menu()
+        )
+        await source.answer()  # Закрываем callback query
+
+    await state.update_data(last_menu_message_id=menu_message.message_id)
+    await state.set_state(RegistrationStates.ADMIN_MENU)
 
 # Обработчик команды /menu
 @router.message(Command("menu"))

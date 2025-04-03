@@ -1343,3 +1343,17 @@ class Database:
             logger.error(f"Ошибка при проверке актуальной версии ПК: {e}")
             logger.exception(e)
             return False
+
+    async def get_admin_pass(self, user_id):
+        """ Возвращает пароль для активации режима админа"""
+        logger.info('Получение пароля админа')
+        try:
+            async with self.pool.acquire() as conn:
+                password = await conn.fetchval("""SELECT password
+                    FROM administrators
+                    WHERE telegramid = $1;""", user_id)
+                return password
+        except Exception as e:
+            logger.error(f"Ошибка при получении пароля админа для пользователя {user_id}: {e}")
+            logger.exception(e)
+            return False

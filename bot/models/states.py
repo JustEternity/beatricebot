@@ -12,6 +12,9 @@ class RegistrationStates(StatesGroup):
     DESCRIPTION = State()      # Ввод описания
     MAIN_MENU = State()        # Главное меню после регистрации
 
+    ADMIN_AUTH = State()  # Состояние для ввода пароля админа
+    ADMIN_MENU = State()       # Меню админа
+
     # Состояния редактирования профиля
     EDIT_NAME = State()        # Редактирование имени
     EDIT_AGE = State()         # Редактирование возраста
