@@ -5,6 +5,8 @@ from .testing import router as testing_router
 from bot.handlers.algorithm import router as compatibility_router
 from aiogram import Router
 from .services import router as services_router
+from .action_likes import router as likes_router
+from .view_likes import router as likes_menu_router
 
 routers = [
     registration_router,
@@ -12,5 +14,7 @@ routers = [
     testing_router,
     services_router,
     compatibility_router,
-    common_router
+    common_router,
+    likes_router,
+    likes_menu_router
 ]

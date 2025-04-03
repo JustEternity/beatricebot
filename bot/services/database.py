@@ -567,7 +567,7 @@ class Database:
                 if bot:
                     logger.info(f"Отправляем уведомление о лайке от {user_id} к {liked_user_id}")
                     # Импортируем функцию здесь, чтобы избежать циклических импортов
-                    from bot.handlers.algorithm import send_like_notification
+                    from bot.services.notifications import send_like_notification
                     await send_like_notification(bot, user_id, liked_user_id, self)
                 else:
                     logger.warning(f"Объект бота не передан при добавлении лайка от {user_id} к {liked_user_id}")
