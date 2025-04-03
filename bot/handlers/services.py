@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from bot.services.database import Database
-from aiogram.filters import Command 
+from aiogram.filters import Command
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ logger.info("Services module loaded")
 async def services_command(message: Message):
     """Команда для проверки работы модуля услуг"""
     logger.info(f"Services command called by user {message.from_user.id}")
-    
+
     # Создаем клавиатуру с услугами
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -27,7 +27,7 @@ async def services_command(message: Message):
             [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
         ]
     )
-    
+
     await message.answer(
         text="📋 <b>Доступные услуги:</b>\n\n"
              "Выберите интересующую вас услугу для получения подробной информации:",
@@ -53,11 +53,11 @@ async def view_services(callback: CallbackQuery, db: Database, state: FSMContext
     """Обработчик для просмотра доступных услуг"""
     user_id = callback.from_user.id
     logger.info(f"Services: User {user_id} requested services list with callback data: {callback.data}")
-    
+
     # Обновляем статус подписки и приоритет пользователя
     await db.update_subscription_status(user_id)
     await db.update_user_priority(user_id)
-    
+
     # Создаем клавиатуру с услугами
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -68,7 +68,7 @@ async def view_services(callback: CallbackQuery, db: Database, state: FSMContext
             [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
         ]
     )
-    
+
     try:
         # Пробуем отредактировать текущее сообщение
         await callback.message.edit_text(
@@ -86,7 +86,7 @@ async def view_services(callback: CallbackQuery, db: Database, state: FSMContext
             reply_markup=keyboard,
             parse_mode="HTML"
         )
-    
+
     await callback.answer()
 
 # Добавляем обработчик для кнопки "Услуги" в главном меню
@@ -95,11 +95,11 @@ async def menu_services(callback: CallbackQuery, db: Database, state: FSMContext
     """Обработчик для кнопки 'Услуги' в главном меню"""
     user_id = callback.from_user.id
     logger.info(f"User {user_id} clicked menu_services button")
-    
+
     # Обновляем статус подписки и приоритет пользователя
     await db.update_subscription_status(user_id)
     await db.update_user_priority(user_id)
-    
+
     # Создаем клавиатуру с услугами
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -110,7 +110,7 @@ async def menu_services(callback: CallbackQuery, db: Database, state: FSMContext
             [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
         ]
     )
-    
+
     try:
         await callback.message.edit_text(
             text="📋 <b>Доступные услуги:</b>\n\n"
@@ -126,7 +126,7 @@ async def menu_services(callback: CallbackQuery, db: Database, state: FSMContext
             reply_markup=keyboard,
             parse_mode="HTML"
         )
-    
+
     await callback.answer()
 
 @router.callback_query(F.data.startswith("service_"))
@@ -136,10 +136,10 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
     try:
         service_id = int(callback.data.split("_")[1])
         user_id = callback.from_user.id
-        
+
         # Исправляем коэффициент приоритета перед показом услуг
         await db.fix_priority_coefficient(user_id)
-        
+
         # Информация об услугах
         service_info = {
             1: {
@@ -170,14 +170,14 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
                 "details": "Значительное повышение видимости вашего профиля в течение недели."
             }
         }
-        
+
         if service_id not in service_info:
             logger.warning(f"Service {service_id} not found")
             await callback.answer("Услуга не найдена", show_alert=True)
             return
-            
+
         service = service_info[service_id]
-        
+
         # Формируем сообщение
         message_text = (
             f"<b>🔍 {service['description']}</b>\n\n"
@@ -187,7 +187,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
             f"🔝 <b>Повышение приоритета:</b> +{service['priorityboostvalue']}%\n\n"
             f"Чтобы приобрести услугу, нажмите кнопку ниже."
         )
-        
+
         # Создаем клавиатуру
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -196,7 +196,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
                 [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
             ]
         )
-        
+
         try:
             await callback.message.edit_text(
                 text=message_text,
@@ -210,7 +210,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
-        
+
         await callback.answer()
     except Exception as e:
         logger.error(f"Error in service_details handler: {e}", exc_info=True)
@@ -222,32 +222,32 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
     try:
         service_id = int(callback.data.split("_")[-1])
         user_id = callback.from_user.id
-        
+
         # Активируем услугу
         success = await db.activate_service(user_id, service_id)
-        
+
         if success:
             # Дополнительно исправляем коэффициент для надежности
             await db.fix_priority_coefficient(user_id)
-            
+
             # Получаем информацию об услуге для сообщения
             service = await db.get_service_by_id(service_id)
             service_name = service['description'] if service else "услуга"
-            
+
             # Получаем обновленную информацию о пользователе
             user_data = await db.get_user(user_id)
             priority_coefficient = user_data['profileprioritycoefficient'] if user_data else 1.0
             subscription_status = user_data['subscriptionstatus'] if user_data else False
-            
+
             # Формируем сообщение с информацией о статусе
             status_text = (
                 f"✅ Услуга «{service_name}» успешно активирована!\n\n"
                 f"📊 Ваш текущий приоритет: {priority_coefficient:.2f}\n"
                 f"🔑 Статус подписки: {'Активна ✅' if subscription_status else 'Неактивна ❌'}"
             )
-            
+
             await callback.answer("✅ Услуга успешно активирована!", show_alert=True)
-            
+
             try:
                 # Показываем сообщение с обновленным статусом
                 await callback.message.edit_text(
@@ -284,12 +284,12 @@ async def view_my_services(callback: CallbackQuery, db: Database):
     try:
         # Добавим логирование для отладки
         logger.debug(f"Showing services for user {callback.from_user.id}")
-        
+
         # Используем get_user_services вместо get_active_services
         services = await db.get_user_services(callback.from_user.id)
-        
+
         logger.debug(f"Found {len(services)} services")
-        
+
         if not services:
             text = "У вас нет активных услуг"
         else:
@@ -301,7 +301,7 @@ async def view_my_services(callback: CallbackQuery, db: Database):
                     f"   Приоритет: +{service['priorityboostvalue']}%\n"
                     f"   Действует до: {end_date}\n\n"
                 )
-        
+
         try:
             # Пробуем отредактировать текущее сообщение
             await callback.message.edit_text(
@@ -319,37 +319,10 @@ async def view_my_services(callback: CallbackQuery, db: Database):
                     [InlineKeyboardButton(text="◀️ Назад", callback_data="view_services")]
                 ])
             )
-        
+
         await callback.answer()
     except Exception as e:
         logger.error(f"Error showing services: {e}", exc_info=True)
         await callback.answer("Ошибка при загрузке услуг", show_alert=True)
 
-# Обработчик для возврата в главное меню
-@router.callback_query(F.data == "back_to_menu")
-async def back_to_menu(callback: CallbackQuery):
-    """Обработчик для возврата в главное меню"""
-    try:
-        from bot.handlers.common import show_main_menu
-        await show_main_menu(callback.message, user_id=callback.from_user.id)
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Error returning to main menu: {e}", exc_info=True)
-        # Если не удалось вызвать функцию из common.py, отправляем сообщение
-        try:
-            await callback.message.edit_text(
-                "Возвращаемся в главное меню...",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-                ])
-            )
-        except Exception as edit_error:
-            logger.error(f"Error editing message: {edit_error}")
-            await callback.message.answer(
-                "Возвращаемся в главное меню...",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-                ])
-            )
-        await callback.answer()
 

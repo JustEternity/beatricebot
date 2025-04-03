@@ -12,8 +12,8 @@ routers = [
     registration_router,
     profile_edit_router,
     testing_router,
-    common_router,
-    services_router,  
+    services_router,
     compatibility_router,
-    sub_router
+    sub_router,
+    common_router
 ]

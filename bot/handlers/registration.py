@@ -12,7 +12,6 @@ from bot.services.database import Database
 from bot.services.encryption import CryptoService
 from bot.services.utils import delete_previous_messages
 from bot.keyboards.menus import policy_keyboard
-from bot.texts.textforbot import POLICY_TEXT
 from bot.services.s3storage import S3Service
 
 from io import BytesIO
@@ -20,24 +19,46 @@ import logging
 logger = logging.getLogger(__name__)
 router = Router()
 
+# Обработчик команды /start
 @router.message(Command("start"))
-async def start_handler(message: Message, state: FSMContext, db: Database):
-    await delete_previous_messages(message, state)
-
-    if await db.is_user_registered(message.from_user.id):
-        await show_main_menu(message, state)
+async def cmd_start(message: Message, state: FSMContext, db: Database):
+    policyid, POLICY_TEXT = await db.get_actual_policy_id()
+    await state.update_data(idpolicy = policyid)
+    user_id = message.from_user.id
+    if await db.is_user_registered(user_id):
+        policy_accept = await db.check_actual_policy(user_id, policyid)
+        # Получаем количество непросмотренных лайков
+        likes_count = await db.get_unviewed_likes_count(user_id)
+        if policy_accept:
+            await show_main_menu(message, state, likes_count)
+        else:
+            await message.answer(POLICY_TEXT, reply_markup=policy_keyboard())
+            await state.set_state(RegistrationStates.POLICY_SECOND_TIME)
         return
-
-    await message.answer(
-        POLICY_TEXT,
-        reply_markup=policy_keyboard(),
-        parse_mode="Markdown"
-    )
+    await message.answer(POLICY_TEXT, reply_markup=policy_keyboard())
     await state.set_state(RegistrationStates.POLICY)
+
+@router.message(RegistrationStates.POLICY_SECOND_TIME, F.text.in_(["✅ Я согласен", "❌ Я не согласен"]))
+async def policy_second_handler(message: Message, state: FSMContext, db: Database,):
+    if message.text == "✅ Я согласен":
+        await state.update_data(policy=True)
+        user_data = await state.get_data()
+        res = await db.save_policy_acception(message.from_user.id, user_data)
+        if res:
+            await message.answer("🎉 Спасибо! Вы можете продолжить использование бота", reply_markup=ReplyKeyboardRemove())
+            await show_main_menu(message, state)
+            logger.debug(f"User {message.from_user.id} accepted policy")
+        else:
+            await message.answer("🚫 Произошла ошибка, попробуйте позже", reply_markup=ReplyKeyboardRemove())
+            logger.debug(f"Ошибка при сохранении согласия на ОПД")
+    else:
+        await message.answer("🚫 Вы не можете использовать бот, без согласия на ОПД. /start - начать заново")
+        await state.clear()
 
 @router.message(RegistrationStates.POLICY, F.text.in_(["✅ Я согласен", "❌ Я не согласен"]))
 async def policy_handler(message: Message, state: FSMContext):
     if message.text == "✅ Я согласен":
+        await state.update_data(policy=True)
         await message.answer("🎉 Спасибо! Как вас зовут?", reply_markup=ReplyKeyboardRemove())
         await state.set_state(RegistrationStates.NAME)
         logger.debug(f"User {message.from_user.id} accepted policy")

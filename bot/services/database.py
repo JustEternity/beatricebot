@@ -87,6 +87,12 @@ class Database:
                     standardized_gender, user_data['location'],
                     user_data['description'], datetime.now(), datetime.now())
 
+                # Сохранение политики согласия с ПК
+                await conn.execute("""
+                    INSERT INTO consenttopdp (usertelegramid, policyversionid, consentstatus)
+                    VALUES ($1, $2, $3)
+                """, telegram_id, user_data['idpolicy'], user_data['policy'])
+
                 # Сохранение фотографий
                 for index, photo_info in enumerate(user_data['photos']):
                     # Извлекаем file_id из словаря с информацией о фото
@@ -141,6 +147,21 @@ class Database:
             except Exception as e:
                 logger.error(f"Error getting data for user {telegram_id}: {e}")
                 return None
+
+    async def save_policy_acception(self, telegram_id: int, user_data: Dict):
+        """Сохранение согласия с ПК (при обновлении)"""
+        logger.info(f"Updating user {telegram_id} policy acception")
+        async with self.pool.acquire() as conn:
+            try:
+                await conn.execute("""
+                            INSERT INTO consenttopdp (usertelegramid, policyversionid, consentstatus)
+                            VALUES ($1, $2, $3)
+                        """, telegram_id, user_data['idpolicy'], user_data['policy'])
+                return True
+            except Exception as e:
+                logger.error(f"❌ Error saving user {telegram_id} policy acception")
+                logger.exception(e)
+                return False
 
     async def update_user_field(self, telegram_id: int, **fields) -> bool:
         """Обновление полей пользователя"""
@@ -501,13 +522,13 @@ class Database:
                 ORDER BY photodisplayorder
                 """
                 rows = await conn.fetch(query, user_id)
-                
+
                 # Логируем для отладки
                 photos = [row['photofileid'] for row in rows] if rows else []
                 logger.debug(f"Получено {len(photos)} фотографий для пользователя {user_id}")
                 for i, photo in enumerate(photos):
                     logger.debug(f"Фото {i+1}: {photo[:30]}...")
-                    
+
                 return photos
         except Exception as e:
             logger.error(f"Ошибка при получении фотографий пользователя {user_id}: {e}")
@@ -518,11 +539,11 @@ class Database:
         try:
             # Проверяем, существует ли уже такой лайк
             like_exists = await self.check_like_exists(user_id, liked_user_id)
-            
+
             if like_exists:
                 logger.info(f"Лайк от {user_id} к {liked_user_id} уже существует")
                 return 0
-            
+
             async with self.pool.acquire() as conn:
                 # Добавляем запись о лайке в базу данных
                 like_id = await conn.fetchval("""
@@ -530,18 +551,18 @@ class Database:
                     VALUES ($1, $2, FALSE)
                     RETURNING likeid
                 """, user_id, liked_user_id)
-                
+
                 logger.info(f"Добавлен лайк от {user_id} к {liked_user_id}, ID: {like_id}")
-                
+
                 # Проверяем на взаимный лайк
                 is_mutual = await self.check_mutual_like(user_id, liked_user_id)
                 logger.info(f"Взаимный лайк между {user_id} и {liked_user_id}: {is_mutual}")
-                
+
                 # Если это взаимный лайк, создаем запись о матче
                 if is_mutual:
                     await self.create_match(user_id, liked_user_id)
                     logger.info(f"Создан матч между {user_id} и {liked_user_id}")
-                
+
                 # Если передан объект бота, отправляем уведомление
                 if bot:
                     logger.info(f"Отправляем уведомление о лайке от {user_id} к {liked_user_id}")
@@ -550,26 +571,25 @@ class Database:
                     await send_like_notification(bot, user_id, liked_user_id, self)
                 else:
                     logger.warning(f"Объект бота не передан при добавлении лайка от {user_id} к {liked_user_id}")
-                
+
                 return like_id
         except Exception as e:
             logger.error(f"Ошибка при добавлении лайка: {e}", exc_info=True)
             return 0
 
-
     async def check_mutual_like(self, user_id: int, liked_user_id: int) -> bool:
         """Проверяет, есть ли взаимный лайк между двумя пользователями"""
         try:
             logger.debug(f"Проверка взаимных лайков между {user_id} и {liked_user_id}")
-            
+
             # Проверяем лайк от первого пользователя ко второму
             like_1_to_2 = await self.check_like_exists(user_id, liked_user_id)
             logger.debug(f"Лайк от {user_id} к {liked_user_id}: {like_1_to_2}")
-            
+
             # Проверяем лайк от второго пользователя к первому
             like_2_to_1 = await self.check_like_exists(liked_user_id, user_id)
             logger.debug(f"Лайк от {liked_user_id} к {user_id}: {like_2_to_1}")
-            
+
             # Взаимный лайк существует только если оба лайка существуют
             return like_1_to_2 and like_2_to_1
         except Exception as e:
@@ -692,14 +712,14 @@ class Database:
                     FROM likes l
                     WHERE l.receivertelegramid = $1
                 """
-                
+
                 if only_unviewed:
                     query += " AND l.likeviewedstatus = FALSE"
-                    
+
                 query += " ORDER BY l.likeid DESC"
-                
+
                 likes = await conn.fetch(query, user_id)
-                
+
                 # Преобразуем результат в список словарей
                 result = []
                 for like in likes:
@@ -708,12 +728,12 @@ class Database:
                         'from_user_id': like['from_user_id'],
                         'likeviewedstatus': like['likeviewedstatus']
                     })
-                
+
                 return result
         except Exception as e:
             logger.error(f"Ошибка при получении лайков пользователя: {e}")
         return []
-        
+
     async def get_user_likes_count(self, user_id):
         """Получает количество лайков пользователя"""
         try:
@@ -724,12 +744,12 @@ class Database:
                 WHERE receivertelegramid = $1
                 """
                 result = await conn.fetchval(query, user_id)
-            
+
             return result or 0
         except Exception as e:
             logger.error(f"Ошибка при получении количества лайков пользователя {user_id}: {e}")
             return 0
-        
+
     async def get_unviewed_likes_count(self, user_id):
         """Получает количество непросмотренных лайков пользователя"""
         try:
@@ -741,7 +761,7 @@ class Database:
                 AND likeviewedstatus = false
                 """
                 result = await conn.fetchval(query, user_id)
-                            
+
                 return result or 0
         except Exception as e:
             logger.error(f"Ошибка при получении количества непросмотренных лайков пользователя {user_id}: {e}")
@@ -750,12 +770,12 @@ class Database:
     async def mark_likes_as_viewed(self, sender_id: int, receiver_id: int = None, only_unviewed: bool = True) -> bool:
         """
         Отмечает лайки как просмотренные.
-        
+
         Args:
             sender_id: ID отправителя лайка или получателя (зависит от наличия receiver_id)
             receiver_id: ID получателя лайка (если None, то sender_id считается получателем)
             only_unviewed: Обновлять только непросмотренные лайки
-        
+
         Returns:
             bool: True в случае успеха, False в случае ошибки
         """
@@ -770,7 +790,7 @@ class Database:
                     """
                     if only_unviewed:
                         query += " AND likeviewedstatus = FALSE"
-                    
+
                     await conn.execute(query, sender_id)
                     logger.info(f"Все лайки пользователя {sender_id} отмечены как просмотренные")
                 else:
@@ -782,10 +802,10 @@ class Database:
                     """
                     if only_unviewed:
                         query += " AND likeviewedstatus = FALSE"
-                    
+
                     await conn.execute(query, sender_id, receiver_id)
                     logger.info(f"Лайки от {sender_id} к {receiver_id} отмечены как просмотренные")
-                
+
                 return True
         except Exception as e:
             logger.error(f"Ошибка при обновлении статуса просмотра лайков: {e}")
@@ -798,14 +818,14 @@ class Database:
                 # Проверяем существование лайка в базе данных
                 result = await conn.fetchval("""
                     SELECT EXISTS(
-                        SELECT 1 FROM likes 
+                        SELECT 1 FROM likes
                         WHERE sendertelegramid = $1 AND receivertelegramid = $2
                     )
                 """, user_id, liked_user_id)
-                
+
                 # Логируем результат для отладки
                 logger.debug(f"Проверка лайка от {user_id} к {liked_user_id}: {bool(result)}")
-                
+
                 return bool(result)
         except Exception as e:
             logger.error(f"Ошибка при проверке существования лайка: {e}")
@@ -818,17 +838,17 @@ class Database:
                 # Проверяем в обоих направлениях
                 result = await conn.fetchval("""
                     SELECT EXISTS(
-                        SELECT 1 FROM matches 
+                        SELECT 1 FROM matches
                         WHERE (usertelegramid = $1 AND matchedusertelegramid = $2)
                         OR (usertelegramid = $2 AND matchedusertelegramid = $1)
                     )
                 """, user1_id, user2_id)
-                
+
                 return bool(result)
         except Exception as e:
             logger.error(f"Ошибка при проверке существования записи о взаимной симпатии: {e}")
             return False
-        
+
     async def debug_likes_table(self, user_id: int = None, liked_user_id: int = None):
         """Отладочный метод для проверки таблицы лайков"""
         try:
@@ -836,7 +856,7 @@ class Database:
                 if user_id and liked_user_id:
                     # Проверяем конкретную пару пользователей
                     query = """
-                        SELECT * FROM likes 
+                        SELECT * FROM likes
                         WHERE (sendertelegramid = $1 AND receivertelegramid = $2)
                         OR (sendertelegramid = $2 AND receivertelegramid = $1)
                     """
@@ -844,7 +864,7 @@ class Database:
                 elif user_id:
                     # Проверяем все лайки, связанные с конкретным пользователем
                     query = """
-                        SELECT * FROM likes 
+                        SELECT * FROM likes
                         WHERE sendertelegramid = $1 OR receivertelegramid = $1
                     """
                     rows = await conn.fetch(query, user_id)
@@ -852,34 +872,34 @@ class Database:
                     # Получаем все лайки
                     query = "SELECT * FROM likes LIMIT 100"
                     rows = await conn.fetch(query)
-                
+
                 # Выводим результаты
                 logger.info(f"Результаты запроса к таблице лайков ({len(rows)} записей):")
                 for row in rows:
                     logger.info(f"Лайк: от {row['sendertelegramid']} к {row['receivertelegramid']}, ID: {row['likeid']}")
-                
+
                 return rows
         except Exception as e:
             logger.error(f"Ошибка при отладке таблицы лайков: {e}")
             return []
-    
+
     async def create_match(self, user1_id: int, user2_id: int) -> bool:
         """Создает запись о взаимной симпатии между пользователями"""
         try:
             # Проверяем, существует ли уже запись о взаимной симпатии
             match_exists = await self.check_match_exists(user1_id, user2_id)
-            
+
             if match_exists:
                 logger.info(f"Запись о взаимной симпатии между {user1_id} и {user2_id} уже существует")
                 return True  # Возвращаем True, так как запись уже существует
-            
+
             # Вычисляем процент совместимости
             try:
                 compatibility = await self.calculate_compatibility(user1_id, user2_id)
             except Exception as e:
                 logger.warning(f"Не удалось вычислить совместимость: {e}")
                 compatibility = 50  # Значение по умолчанию
-            
+
             async with self.pool.acquire() as conn:
                 # Используем ON CONFLICT DO NOTHING для предотвращения ошибок дублирования
                 # Создаем первую запись
@@ -888,14 +908,14 @@ class Database:
                     VALUES ($1, $2, $3)
                     ON CONFLICT (usertelegramid, matchedusertelegramid) DO NOTHING
                 """, user1_id, user2_id, compatibility)
-                
+
                 # Создаем вторую запись (для обратной связи)
                 await conn.execute("""
                     INSERT INTO matches (usertelegramid, matchedusertelegramid, interestmatchpercentage)
                     VALUES ($1, $2, $3)
                     ON CONFLICT (usertelegramid, matchedusertelegramid) DO NOTHING
                 """, user2_id, user1_id, compatibility)
-                
+
                 logger.info(f"Создана запись о взаимной симпатии между {user1_id} и {user2_id}")
                 return True
         except Exception as e:
@@ -908,14 +928,14 @@ class Database:
         try:
             async with self.pool.acquire() as conn:
                 query = """
-                    SELECT 
-                        serviceid, 
-                        cost, 
-                        serviceduration, 
-                        description, 
-                        priorityboostvalue, 
-                        availabilitystatus 
-                    FROM servicetypes 
+                    SELECT
+                        serviceid,
+                        cost,
+                        serviceduration,
+                        description,
+                        priorityboostvalue,
+                        availabilitystatus
+                    FROM servicetypes
                     ORDER BY cost ASC
                 """
                 rows = await conn.fetch(query)
@@ -930,14 +950,14 @@ class Database:
         try:
             async with self.pool.acquire() as conn:
                 query = """
-                    SELECT 
-                        serviceid, 
-                        cost, 
-                        serviceduration, 
-                        description, 
-                        priorityboostvalue, 
-                        availabilitystatus 
-                    FROM servicetypes 
+                    SELECT
+                        serviceid,
+                        cost,
+                        serviceduration,
+                        description,
+                        priorityboostvalue,
+                        availabilitystatus
+                    FROM servicetypes
                     WHERE serviceid = $1
                 """
                 row = await conn.fetchrow(query, service_id)
@@ -973,7 +993,7 @@ class Database:
         except Exception as e:
             logger.error(f"Error fetching active services for user {user_id}: {e}")
             return []
-        
+
     async def get_active_services(self, user_id: int) -> List[Dict]:
         """Обертка для обратной совместимости"""
         logger.warning("Method get_active_services is deprecated, use get_user_services instead")
@@ -982,7 +1002,7 @@ class Database:
     async def calculate_priority_coefficient(self, user_id: int) -> float:
         """Рассчитывает общий коэффициент приоритета пользователя"""
         from decimal import Decimal
-        
+
         base_coefficient = Decimal('1.0')  # Используем Decimal вместо float
         try:
             async with self.pool.acquire() as conn:
@@ -1031,10 +1051,10 @@ class Database:
                 # Проверяем, есть ли уже активная услуга с таким ID у пользователя
                 active_service = await conn.fetchrow(
                     """
-                    SELECT * FROM purchasedservices 
-                    WHERE usertelegramid = $1 
-                    AND serviceid = $2 
-                    AND serviceenddate > NOW() 
+                    SELECT * FROM purchasedservices
+                    WHERE usertelegramid = $1
+                    AND serviceid = $2
+                    AND serviceenddate > NOW()
                     AND paymentstatus = TRUE
                     """,
                     user_id,
@@ -1085,10 +1105,10 @@ class Database:
                 await conn.execute(
                     """
                     INSERT INTO purchasedservices (
-                        usertelegramid, 
-                        serviceid, 
-                        serviceenddate, 
-                        paymentstatus, 
+                        usertelegramid,
+                        serviceid,
+                        serviceenddate,
+                        paymentstatus,
                         paymentid
                     ) VALUES ($1, $2, $3, $4, $5)
                     """,
@@ -1170,8 +1190,8 @@ class Database:
                 SELECT COALESCE(SUM(st.priorityboostvalue / 100.0), 0) as total_coefficient
                 FROM purchasedservices ps
                 JOIN servicetypes st ON ps.serviceid = st.serviceid
-                WHERE ps.usertelegramid = $1 
-                AND ps.serviceenddate > NOW() 
+                WHERE ps.usertelegramid = $1
+                AND ps.serviceenddate > NOW()
                 AND ps.paymentstatus = TRUE
                 """
 
@@ -1187,8 +1207,8 @@ class Database:
                     # Проверяем структуру таблиц
                     tables = await conn.fetch(
                         """
-                        SELECT table_name 
-                        FROM information_schema.tables 
+                        SELECT table_name
+                        FROM information_schema.tables
                         WHERE table_schema = 'public'
                         """
                     )
@@ -1292,3 +1312,34 @@ class Database:
             logger.error(f"Error updating all users priority: {e}")
             logger.exception(e)
             return 0
+
+    async def check_actual_policy(self, user_id: int, policyid: int):
+        """Проверяет принял ли пользователь актуальную политику конфиденциальности"""
+        logger.info("Проверка согласия на обработку персональных данных")
+        try:
+            async with self.pool.acquire() as conn:
+                res = await conn.fetchval("""SELECT EXISTS (SELECT 1
+                FROM consenttopdp
+                WHERE usertelegramid = $1 AND policyversionid = $2 AND consentstatus = true)""", user_id, policyid)
+                logger.info(f'Пользователь {user_id} согласен с актуальной ПК {res}')
+                return bool(res)
+        except Exception as e:
+            logger.error(f"Ошибка при проверке согласия на ОПД пользователя {user_id}: {e}")
+            logger.exception(e)
+            return False
+
+    async def get_actual_policy_id(self):
+        """ Возвращает самую актуальную версию ПК"""
+        logger.info('Поиск актуальной версии ПК')
+        try:
+            async with self.pool.acquire() as conn:
+                vers, text = await conn.fetchrow("""SELECT policyversionid, consenttext
+                    FROM privacypolicy
+                    ORDER BY effectivedate DESC, policyversionid DESC
+                    LIMIT 1;""")
+                logger.info(f'Актуальная ПК {vers}')
+                return int(vers), text
+        except Exception as e:
+            logger.error(f"Ошибка при проверке актуальной версии ПК: {e}")
+            logger.exception(e)
+            return False

@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from bot.models.states import RegistrationStates
 from bot.services.database import Database
-from bot.keyboards.menus import main_menu, back_to_menu_button as back
+from bot.keyboards.menus import main_menu, back_to_menu_button as back, policy_keyboard
 from bot.services.utils import delete_previous_messages
 from bot.services.encryption import CryptoService
 from bot.texts.textforbot import POLICY_TEXT
@@ -13,25 +13,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = Router()
-
-# Обработчик команды /start
-@router.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext, db: Database):
-    user_id = message.from_user.id
-    if await db.is_user_registered(user_id):
-        # Получаем количество непросмотренных лайков
-        likes_count = await db.get_unviewed_likes_count(user_id)
-        await show_main_menu(message, state, likes_count)
-        return
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✅ Я согласен")],
-            [KeyboardButton(text="❌ Я не согласен")]
-        ],
-        resize_keyboard=True
-    )
-    await message.answer(POLICY_TEXT, reply_markup=keyboard)
-    await state.set_state(RegistrationStates.POLICY)
 
 # Обработчик команды /menu
 @router.message(Command("menu"))
@@ -49,7 +30,7 @@ async def cmd_cancel(message: Message, state: FSMContext, db: Database):
         reply_markup=ReplyKeyboardRemove()
     )
     await state.clear()
-    
+
     # Получаем количество непросмотренных лайков
     likes_count = await db.get_unviewed_likes_count(message.from_user.id)
     await show_main_menu(message, state, likes_count)
@@ -58,23 +39,23 @@ async def cmd_cancel(message: Message, state: FSMContext, db: Database):
 async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     """Универсальный обработчик возврата в меню"""
     await callback.answer()
-    
+
     try:
         # Получаем количество непросмотренных лайков
         unviewed_likes = await db.get_unviewed_likes_count(callback.from_user.id)
-        
+
         # Удаляем текущее сообщение
         await callback.message.delete()
-        
+
         # Отправляем новое сообщение с главным меню
         await callback.message.answer(
             "🔹 Главное меню 🔹",
             reply_markup=main_menu(unviewed_likes)
         )
-        
+
         # Очищаем состояние
         await state.clear()
-        
+
     except Exception as e:
         logger.error(f"Ошибка в back_to_menu_handler: {e}")
         # Если не получилось удалить сообщение, отправляем новое
@@ -82,15 +63,14 @@ async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: D
             unviewed_likes = await db.get_unviewed_likes_count(callback.from_user.id)
         except:
             unviewed_likes = 0
-            
+
         await callback.message.answer(
             "🔹 Главное меню 🔹",
             reply_markup=main_menu(unviewed_likes)
         )
-        
+
         # Очищаем состояние
         await state.clear()
-
 
 # Общая функция показа главного меню
 async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, likes_count: int = 0):
@@ -106,7 +86,7 @@ async def update_main_menu(message, state: FSMContext, db: Database):
     """Обновляет главное меню с актуальным количеством лайков"""
     # Получаем актуальное количество непросмотренных лайков
     likes_count = await db.get_unviewed_likes_count(message.chat.id)
-    
+
     # Обновляем меню
     await message.edit_text(
         "🔹 Главное меню 🔹",
@@ -138,10 +118,10 @@ async def feedback_text_handler(message: Message, state: FSMContext, db: Databas
             user_id=message.from_user.id,
             text=feedback_text,
         )
-        
+
         # Получаем количество непросмотренных лайков
         likes_count = await db.get_unviewed_likes_count(message.from_user.id)
-        
+
         # Отправляем подтверждение
         if success:
             await message.answer(
