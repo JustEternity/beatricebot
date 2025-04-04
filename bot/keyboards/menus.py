@@ -47,6 +47,78 @@ def admin_menu() -> InlineKeyboardMarkup:
         ]
     )
 
+def back_to_admin_menu_button() -> InlineKeyboardMarkup:
+    """Кнопка возврата в меню админа"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_admin_menu")]
+        ]
+    )
+
+def reports_menu() -> InlineKeyboardMarkup:
+    """ Инлайн-клавиатура доступных отчетов"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Активность за месяц", callback_data="get_active_users")],
+            [InlineKeyboardButton(text="Регистрации за год", callback_data="get_count_of_regs")],
+            [InlineKeyboardButton(text="Мои результаты", callback_data="admin_results")],
+            [InlineKeyboardButton(text="Купленные услуги за год", callback_data="get_purchased_services")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_admin_menu")]
+        ]
+    )
+
+def back_to_reports_menu() -> InlineKeyboardMarkup:
+    """ Кнопка назад к отчетам и в меню"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="К отчетам", callback_data="admin_reports")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_admin_menu")]
+        ]
+    )
+
+def feedback_categories() -> InlineKeyboardMarkup:
+    """Категории обращений обратной связи"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Баги", callback_data="feedback_bags")],
+            [InlineKeyboardButton(text="Пожелания", callback_data="feedback_wishes")],
+            [InlineKeyboardButton(text="Спам", callback_data="feedback_spam")],
+            [InlineKeyboardButton(text="Сотрудничество", callback_data="feedback_collab")],
+            [InlineKeyboardButton(text="Другое", callback_data="feedback_other")],
+            [InlineKeyboardButton(text="Назад в меню", callback_data="back_to_admin_menu")]
+        ]
+    )
+
+def complaint_decisions() -> InlineKeyboardMarkup:
+    """Решения для жалоб"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Пропустить", callback_data="complaint_skip")],
+            [InlineKeyboardButton(text="Блокировать", callback_data="complaint_block")],
+            [InlineKeyboardButton(text="Назад в меню", callback_data="back_to_admin_menu")]
+        ]
+    )
+
+def verify_decisions() -> InlineKeyboardMarkup:
+    """Решения для верификации"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Пропустить", callback_data="verify_skip")],
+            [InlineKeyboardButton(text="Блокировать", callback_data="verify_block")],
+            [InlineKeyboardButton(text="Назад в меню", callback_data="back_to_admin_menu")]
+        ]
+    )
+
+def moder_decisions() -> InlineKeyboardMarkup:
+    """Решения для модерации"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Пропустить", callback_data="moder_skip")],
+            [InlineKeyboardButton(text="Блокировать", callback_data="moder_block")],
+            [InlineKeyboardButton(text="Назад в меню", callback_data="back_to_admin_menu")]
+        ]
+    )
+
 def main_menu(likes_count=0) -> InlineKeyboardMarkup:
     """Инлайн-клавиатура главного меню с количеством лайков"""
     likes_text = f"❤️ Лайки ({likes_count})" if likes_count > 0 else "❤️ Лайки"

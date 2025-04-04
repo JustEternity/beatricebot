@@ -6,6 +6,7 @@ from bot.handlers.algorithm import router as compatibility_router
 from .subscription import router as sub_router
 from aiogram import Router
 from .services import router as services_router
+from .admin_funcs import router as admin_router
 
 # Все роутеры для удобного импорта
 routers = [
@@ -15,5 +16,6 @@ routers = [
     services_router,
     compatibility_router,
     sub_router,
+    admin_router,
     common_router
 ]

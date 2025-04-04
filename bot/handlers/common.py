@@ -11,6 +11,7 @@ from bot.services.encryption import CryptoService
 from bot.texts.textforbot import POLICY_TEXT
 from bot.services.s3storage import S3Service
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -71,6 +72,35 @@ async def check_admin_password(message: Message, state: FSMContext, db: Database
 
         # Возвращаемся в обычное меню
         await show_main_menu(message, state)
+
+@router.callback_query(F.data == "back_to_admin_menu")
+async def back_to_admin_menu_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    """Универсальный обработчик возврата в меню админа"""
+    await callback.answer()
+
+    try:
+        # Удаляем текущее сообщение
+        await callback.message.delete()
+
+        # Отправляем новое сообщение с главным меню
+        await callback.message.answer(
+            "🔹 Главное меню администратора🔹",
+            reply_markup=admin_menu()
+        )
+
+        # Очищаем состояние
+        await state.clear()
+
+    except Exception as e:
+        logger.error(f"Ошибка в back_to_admin_menu_handler: {e}")
+
+        await callback.message.answer(
+            "🔹 Главное меню администратора🔹",
+            reply_markup=admin_menu()
+        )
+
+        # Очищаем состояние
+        await state.clear()
 
 # Общая функция показа главного меню админа
 async def show_admin_menu(source: Message | CallbackQuery, state: FSMContext):
@@ -269,3 +299,93 @@ async def unexpected_messages_handler(message: Message, state: FSMContext, db: D
             "Пожалуйста, завершите текущее действие "
             "или нажмите /cancel для отмены."
         )
+
+async def get_user_profile(
+    user_id: int,
+    db: Database,
+    crypto: CryptoService,
+    bot: Bot,
+    s3: S3Service,
+    refresh_photos: bool = False
+) -> dict:
+    """
+    Получает и подготавливает данные профиля пользователя
+    :param user_id: ID целевого пользователя
+    :param refresh_photos: Принудительное обновление фото
+    :return: Словарь с данными профиля или None
+    """
+    profile_data = {
+        'text': None,
+        'photos': [],
+        'user_id': user_id
+    }
+
+    try:
+        # Получаем сырые данные из БД
+        user_data = await db.get_user_data(user_id)
+        if not user_data:
+            return None
+
+        # Проверка и обновление фото
+        if refresh_photos or not user_data.get('photos'):
+            s3_urls = [photo['s3_url'] for photo in user_data.get('photos', [])]
+
+            # Логика обновления фото
+            new_photos = []
+            if s3_urls:
+                local_paths = await s3.download_photos_by_urls(s3_urls)
+                for path in local_paths:
+                    try:
+                        with open(path, 'rb') as f:
+                            msg = await bot.send_photo(user_id, f)
+                            new_photos.append({
+                                'file_id': msg.photo[-1].file_id,
+                                's3_url': next(url for url in s3_urls if url.split('/')[-1] in path)
+                            })
+                        os.remove(path)
+                    except Exception as e:
+                        logger.error(f"Photo reload error: {str(e)}")
+
+                if new_photos:
+                    await db.update_user_photos(user_id, new_photos)
+                    user_data['photos'] = new_photos
+
+        # Декодирование данных
+        decrypted_fields = {
+            'name': crypto.decrypt(user_data['name']),
+            'location': crypto.decrypt(user_data['location']),
+            'description': crypto.decrypt(user_data['description'])
+        }
+
+        # Преобразование пола
+        gender_map = {
+            '0': "👨 Мужской",
+            '1': "👩 Женский",
+            0: "👨 Мужской",
+            1: "👩 Женский"
+        }
+        gender = gender_map.get(user_data['gender'], "Не указан")
+
+        # Формирование текста
+        profile_text = (
+            f"👤 *Профиль пользователя:*\n\n"
+            f"▪️ ID: `{user_id}`\n"
+            f"▪️ Имя: {decrypted_fields['name']}\n"
+            f"▪️ Возраст: {user_data['age']}\n"
+            f"▪️ Пол: {gender}\n"
+            f"▪️ Локация: {decrypted_fields['location']}\n"
+            f"▪️ Описание: {decrypted_fields['description']}"
+        )
+
+        # Сборка результата
+        profile_data.update({
+            'text': profile_text,
+            'photos': [photo['file_id'] for photo in user_data.get('photos', [])]
+        })
+
+    except Exception as e:
+        logger.error(f"Profile build error: {str(e)}")
+        return None
+
+    return profile_data
+

@@ -14,6 +14,15 @@ class RegistrationStates(StatesGroup):
 
     ADMIN_AUTH = State()  # Состояние для ввода пароля админа
     ADMIN_MENU = State()       # Меню админа
+    WATCH_REPORTS = State()    # Просмотр доступных отчетов админу
+    AWAIT_YEAR = State()       # Ожидание года для отчета
+    AWAIT_YEAR_FOR_SERV = State() # Ожидание года для отчета по купленным услугам
+    WATCH_FEEDBACK = State()   # просмотр обратной связи в режиме админа
+    WATCH_COMPLAINTS = State() # Просмотр жалоб в режиме админа
+    WATCH_VERIFY = State()     # Просмотр верификаций в режиме админа
+    WATCH_MODER = State()      # Модерация анкет в режиме админа
+    AWAIT_REJECT_REASON = State() # Ожидание ввода причны негативной верификации
+    AWAIT_BLOCK_REASON = State() # Ожидание ввода причины блока анкеты
 
     # Состояния редактирования профиля
     EDIT_NAME = State()        # Редактирование имени

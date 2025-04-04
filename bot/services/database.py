@@ -1357,3 +1357,201 @@ class Database:
             logger.error(f"Ошибка при получении пароля админа для пользователя {user_id}: {e}")
             logger.exception(e)
             return False
+
+    async def get_reports(self):
+        """ Возвращает все доступные отчеты"""
+        logger.info('Запрос доступных отчетов')
+        try:
+            async with self.pool.acquire() as conn:
+                reports = await conn.fetch("""
+                    SELECT reporttypeid, reportsqlquery
+                    FROM reports
+                    ORDER BY reporttypeid;
+                """)
+                return {record['reporttypeid']: record['reportsqlquery'] for record in reports}
+        except Exception as e:
+            logger.error(f"Ошибка при получении доступных отчетов {e}")
+            logger.exception(e)
+            return None
+
+    async def exec_report(self, query: str, *args) -> dict:
+        """
+        Выполняет SQL-запрос и возвращает результат в формате словаря
+        :param query: SQL-запрос
+        :param args: Параметры для запроса (опционально)
+        :return: Словарь с результатами или ошибкой
+        """
+
+        try:
+            async with self.pool.acquire() as conn:
+                records = await conn.fetch(query, *args)
+                result = [dict(record) for record in records]
+
+        except Exception as e:
+            result['error'] = str(e)
+            logger.error(f"Query execution failed: {e}\nQuery: {query}")
+
+        return result
+
+    async def get_feedback(self):
+        """Возвращает словарь {feedbackid: messageid} для необработанных обращений"""
+        logger.info('Запрос необработанных обращений')
+        try:
+            async with self.pool.acquire() as conn:
+                records = await conn.fetch("""
+                    SELECT feedbackid, messagetext
+                    FROM feedback
+                    WHERE processingstatus = false
+                    ORDER BY feedbackid;
+                """)
+
+                return {record['feedbackid']: record['messagetext'] for record in records}
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении обращений: {e}")
+            logger.exception(e)
+            return None
+
+    async def update_feedback_status(self, feedback_id, category, status, admin_id):
+        """Обновляет статус и категорию обращения"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE feedback
+                    SET
+                        category = $1,
+                        processingstatus = $2,
+                        admintelegramid = $3
+                    WHERE feedbackid = $4
+                    """,
+                    category, status, admin_id, feedback_id
+                )
+                logger.info(f"Обновлен статус обращения ID {feedback_id}")
+        except Exception as e:
+            logger.error(f"Ошибка обновления статуса обращения: {e}")
+            logger.exception(e)
+
+    async def get_complaints(self):
+        """Возвращает словарь необработанных жалоб"""
+        logger.info('Запрос необработанных жалоб')
+        try:
+            async with self.pool.acquire() as conn:
+                records = await conn.fetch("""
+                    SELECT complaintid, reportedusertelegramid, complaintreason
+                    FROM complaints
+                    WHERE processingstatus = false
+                    ORDER BY complaintid;
+                """)
+
+                return {
+                record['complaintid']: (
+                    record['reportedusertelegramid'],
+                    record['complaintreason']
+                )
+                for record in records
+            }
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении жалоб: {e}")
+            logger.exception(e)
+            return None
+
+    async def update_complaint_status(self, complaint_id, category, status, admin_id):
+        """Обновляет статус и категорию жалобы"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE complaints
+                    SET
+                        category = $1,
+                        processingstatus = $2,
+                        admintelegramid = $3
+                    WHERE complaintid = $4
+                    """,
+                    category, status, admin_id, complaint_id
+                )
+                logger.info(f"Обновлен статус жалобы ID {complaint_id}")
+        except Exception as e:
+            logger.error(f"Ошибка обновления статуса жалобы: {e}")
+            logger.exception(e)
+
+    async def get_verifications(self):
+        """Возвращает словарь необработанных верификаций"""
+        logger.info('Запрос необработанных верификаций')
+        try:
+            async with self.pool.acquire() as conn:
+                records = await conn.fetch("""
+                    SELECT verificationid, verificationvideofileid, usertelegramid
+                    FROM verifications
+                    WHERE processingstatus = 'open'
+                    ORDER BY verificationid;
+                """)
+
+                return {
+                record['verificationid']: (record['verificationvideofileid'], record['usertelegramid']) for record in records
+            }
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении необработанных верификаций: {e}")
+            logger.exception(e)
+            return None
+
+    async def update_verification(
+        self,
+        verification_id: int,
+        status: str,  # 'approved' или 'rejected'
+        rejection_reason: str = None
+    ):
+        """Обновляет статус верификации и причину отказа"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE verifications
+                    SET processingstatus = $1,
+                        rejectionreason = $2,
+                        verificationdate = NOW()
+                    WHERE verificationid = $3
+                """, status, rejection_reason, verification_id)
+        except Exception as e:
+            logger.error(f"Ошибка обновления верификации: {e}")
+
+    async def get_moderations(self):
+        """Возвращает словарь необработанных модераций"""
+        logger.info('Запрос необработанных модераций')
+        try:
+            async with self.pool.acquire() as conn:
+                records = await conn.fetch("""
+                    SELECT moderationid, usertelegramid
+                    FROM moderations
+                    WHERE processingstatus = 'open'
+                    ORDER BY moderationid;
+                """)
+
+                return {
+                record['moderationid']: record['usertelegramid'] for record in records
+            }
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении необработанных верификаций: {e}")
+            logger.exception(e)
+            return None
+
+    async def update_moderation_status(
+        self,
+        moderationid: int,
+        status: str,  # 'approved' или 'blocked'
+        admin_id: int,
+        rejection_reason: str = None
+    ):
+        """Обновляет статус модерации"""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE moderations
+                SET admintelegramid = $1,
+                    processingstatus = $2,
+                    rejectionreason = $3,
+                    moderationdate = CURRENT_TIMESTAMP
+                WHERE moderationid = $4
+            """, admin_id, status, rejection_reason, moderationid)
