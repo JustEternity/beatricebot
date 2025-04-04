@@ -539,11 +539,10 @@ class Database:
         try:
             # Проверяем, существует ли уже такой лайк
             like_exists = await self.check_like_exists(user_id, liked_user_id)
-
             if like_exists:
                 logger.info(f"Лайк от {user_id} к {liked_user_id} уже существует")
                 return 0
-
+            
             async with self.pool.acquire() as conn:
                 # Добавляем запись о лайке в базу данных
                 like_id = await conn.fetchval("""
@@ -551,18 +550,23 @@ class Database:
                     VALUES ($1, $2, FALSE)
                     RETURNING likeid
                 """, user_id, liked_user_id)
-
                 logger.info(f"Добавлен лайк от {user_id} к {liked_user_id}, ID: {like_id}")
-
+                
                 # Проверяем на взаимный лайк
                 is_mutual = await self.check_mutual_like(user_id, liked_user_id)
                 logger.info(f"Взаимный лайк между {user_id} и {liked_user_id}: {is_mutual}")
-
-                # Если это взаимный лайк, создаем запись о матче
+                
+                # Если это взаимный лайк, помечаем оба лайка как просмотренные
                 if is_mutual:
-                    await self.create_match(user_id, liked_user_id)
-                    logger.info(f"Создан матч между {user_id} и {liked_user_id}")
-
+                    # Помечаем оба лайка как просмотренные
+                    await conn.execute("""
+                        UPDATE likes 
+                        SET likeviewedstatus = TRUE 
+                        WHERE (sendertelegramid = $1 AND receivertelegramid = $2)
+                        OR (sendertelegramid = $2 AND receivertelegramid = $1)
+                    """, user_id, liked_user_id)
+                    logger.info(f"Оба лайка между {user_id} и {liked_user_id} помечены как просмотренные")
+                
                 # Если передан объект бота, отправляем уведомление
                 if bot:
                     logger.info(f"Отправляем уведомление о лайке от {user_id} к {liked_user_id}")
@@ -571,7 +575,7 @@ class Database:
                     await send_like_notification(bot, user_id, liked_user_id, self)
                 else:
                     logger.warning(f"Объект бота не передан при добавлении лайка от {user_id} к {liked_user_id}")
-
+                
                 return like_id
         except Exception as e:
             logger.error(f"Ошибка при добавлении лайка: {e}", exc_info=True)
@@ -581,17 +585,18 @@ class Database:
         """Проверяет, есть ли взаимный лайк между двумя пользователями"""
         try:
             logger.debug(f"Проверка взаимных лайков между {user_id} и {liked_user_id}")
-
-            # Проверяем лайк от первого пользователя ко второму
-            like_1_to_2 = await self.check_like_exists(user_id, liked_user_id)
-            logger.debug(f"Лайк от {user_id} к {liked_user_id}: {like_1_to_2}")
-
-            # Проверяем лайк от второго пользователя к первому
-            like_2_to_1 = await self.check_like_exists(liked_user_id, user_id)
-            logger.debug(f"Лайк от {liked_user_id} к {user_id}: {like_2_to_1}")
-
-            # Взаимный лайк существует только если оба лайка существуют
-            return like_1_to_2 and like_2_to_1
+            async with self.pool.acquire() as conn:
+                # Проверяем наличие взаимных лайков, где хотя бы один из лайков не просмотрен
+                result = await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM likes l1
+                        JOIN likes l2 ON l1.sendertelegramid = l2.receivertelegramid
+                                    AND l1.receivertelegramid = l2.sendertelegramid
+                        WHERE (l1.sendertelegramid = $1 AND l1.receivertelegramid = $2)
+                        AND (l1.likeviewedstatus = FALSE OR l2.likeviewedstatus = FALSE)
+                    )
+                """, user_id, liked_user_id)
+                return bool(result)
         except Exception as e:
             logger.error(f"Ошибка при проверке взаимного лайка: {e}")
             return False
@@ -703,36 +708,31 @@ class Database:
             logger.error(f"Feedback save error: {str(e)}")
             return False
 
-    async def get_user_likes(self, user_id: int, only_unviewed: bool = False) -> list:
-        """Получает список пользователей, которые лайкнули текущего пользователя"""
+    async def get_user_likes(self, user_id, only_unviewed=False):
         try:
             async with self.pool.acquire() as conn:
-                query = """
-                    SELECT l.likeid, l.sendertelegramid as from_user_id, l.likeviewedstatus
-                    FROM likes l
-                    WHERE l.receivertelegramid = $1
-                """
-
                 if only_unviewed:
-                    query += " AND l.likeviewedstatus = FALSE"
-
-                query += " ORDER BY l.likeid DESC"
-
+                    query = """
+                        SELECT likeid, sendertelegramid as from_user_id, receivertelegramid as to_user_id, 
+                            likeviewedstatus
+                        FROM likes 
+                        WHERE receivertelegramid = $1 AND likeviewedstatus = FALSE
+                        ORDER BY likeid DESC
+                    """
+                else:
+                    query = """
+                        SELECT likeid, sendertelegramid as from_user_id, receivertelegramid as to_user_id, 
+                            likeviewedstatus
+                        FROM likes 
+                        WHERE receivertelegramid = $1
+                        ORDER BY likeid DESC
+                    """
+                
                 likes = await conn.fetch(query, user_id)
-
-                # Преобразуем результат в список словарей
-                result = []
-                for like in likes:
-                    result.append({
-                        'likeid': like['likeid'],
-                        'from_user_id': like['from_user_id'],
-                        'likeviewedstatus': like['likeviewedstatus']
-                    })
-
-                return result
+                return [dict(like) for like in likes]
         except Exception as e:
-            logger.error(f"Ошибка при получении лайков пользователя: {e}")
-        return []
+            logging.error(f"Ошибка при получении лайков пользователя {user_id}: {e}")
+            return []
 
     async def get_user_likes_count(self, user_id):
         """Получает количество лайков пользователя"""
@@ -882,45 +882,6 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при отладке таблицы лайков: {e}")
             return []
-
-    async def create_match(self, user1_id: int, user2_id: int) -> bool:
-        """Создает запись о взаимной симпатии между пользователями"""
-        try:
-            # Проверяем, существует ли уже запись о взаимной симпатии
-            match_exists = await self.check_match_exists(user1_id, user2_id)
-
-            if match_exists:
-                logger.info(f"Запись о взаимной симпатии между {user1_id} и {user2_id} уже существует")
-                return True  # Возвращаем True, так как запись уже существует
-
-            # Вычисляем процент совместимости
-            try:
-                compatibility = await self.calculate_compatibility(user1_id, user2_id)
-            except Exception as e:
-                logger.warning(f"Не удалось вычислить совместимость: {e}")
-                compatibility = 50  # Значение по умолчанию
-
-            async with self.pool.acquire() as conn:
-                # Используем ON CONFLICT DO NOTHING для предотвращения ошибок дублирования
-                # Создаем первую запись
-                await conn.execute("""
-                    INSERT INTO matches (usertelegramid, matchedusertelegramid, interestmatchpercentage)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (usertelegramid, matchedusertelegramid) DO NOTHING
-                """, user1_id, user2_id, compatibility)
-
-                # Создаем вторую запись (для обратной связи)
-                await conn.execute("""
-                    INSERT INTO matches (usertelegramid, matchedusertelegramid, interestmatchpercentage)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (usertelegramid, matchedusertelegramid) DO NOTHING
-                """, user2_id, user1_id, compatibility)
-
-                logger.info(f"Создана запись о взаимной симпатии между {user1_id} и {user2_id}")
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при создании записи о взаимной симпатии: {e}")
-            return False
 
     async def get_all_services(self):
         """Получает список всех доступных услуг"""

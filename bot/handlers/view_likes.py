@@ -28,14 +28,14 @@ async def view_likes_handler(callback: CallbackQuery, state: FSMContext, db: Dat
                 reply_markup=back_to_menu_button()
             )
             return
-            
+        
         # Сохраняем список лайков в состоянии
         await state.update_data(likes_list=likes, current_like_index=0)
         
         # Удаляем текущее сообщение, чтобы избежать ошибок при редактировании
         await delete_message_safely(callback.message)
         
-        # Показываем первый лайк
+        # Показываем первый лайк - исправленный вызов
         await show_like_profile(callback.message, callback.from_user.id, state, db, crypto)
     except Exception as e:
         logger.error(f"Ошибка в view_likes_handler: {e}", exc_info=True)
@@ -55,7 +55,7 @@ async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext,
     # Извлекаем ID пользователя из callback_data
     liker_id = int(callback.data.split(":")[1])
     # Отмечаем лайк как просмотренный
-    await db.mark_likes_as_viewed(liker_id, callback.from_user.id)
+    # await db.mark_likes_as_viewed(liker_id, callback.from_user.id)
     
     # Получаем данные пользователя
     user_profile = await db.get_user_profile(liker_id)
@@ -107,11 +107,8 @@ async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext,
 async def show_my_likes(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
     try:
         # Получаем только НЕпросмотренные лайки
-        likes = await db.fetch(
-            "SELECT likeid, sendertelegramid FROM likes WHERE receivertelegramid = $1 AND likeviewedstatus = FALSE",
-            callback.from_user.id
-        )
-
+        likes = await db.get_user_likes(callback.from_user.id, only_unviewed=True)
+        
         if not likes:
             await callback.message.edit_text(
                 "У вас пока нет новых лайков.",
@@ -119,15 +116,14 @@ async def show_my_likes(callback: CallbackQuery, state: FSMContext, db: Database
             )
             await callback.answer()
             return
-
+        
         # Сохраняем список лайков в состоянии
         await state.update_data(likes_list=likes, current_like_index=0)
-
-        # Показываем первый профиль
-        await show_like_profile(callback.message, state, db, crypto)
-
+        
+        # Показываем первый профиль - исправленный вызов
+        await show_like_profile(callback.message, callback.from_user.id, state, db, crypto)
+        
         await callback.answer()
-
     except Exception as e:
         logger.error(f"Ошибка при получении лайков: {e}")
         await callback.message.edit_text(
@@ -153,14 +149,14 @@ async def next_like_handler(callback: CallbackQuery, state: FSMContext, db: Data
                 reply_markup=back_to_menu_button()
             )
             return
-            
+        
         # Увеличиваем индекс
         await state.update_data(current_like_index=current_index + 1)
         
         # Удаляем текущее сообщение
         await delete_message_safely(callback.message)
         
-        # Показываем следующий профиль
+        # Показываем следующий профиль - исправленный вызов
         await show_like_profile(callback.message, callback.from_user.id, state, db, crypto)
     except Exception as e:
         logger.error(f"Ошибка при переходе к следующему лайку: {e}", exc_info=True)
@@ -185,7 +181,7 @@ async def prev_like_handler(callback: CallbackQuery, state: FSMContext, db: Data
         # Удаляем текущее сообщение
         await delete_message_safely(callback.message)
         
-        # Показываем предыдущий профиль
+        # Показываем предыдущий профиль - исправленный вызов
         await show_like_profile(callback.message, callback.from_user.id, state, db, crypto)
     else:
         await callback.answer("Это первый лайк в списке", show_alert=True)

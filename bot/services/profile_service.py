@@ -65,8 +65,9 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
         
         # Если список лайков пуст
         if not likes_list:
-            await message.answer(
-                "У вас нет непросмотренных лайков.",
+            await message.bot.send_message(
+                chat_id=user_id,
+                text="У вас нет непросмотренных лайков.",
                 reply_markup=back_to_menu_button()
             )
             return
@@ -84,8 +85,9 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
         if not liker_id:
             # Логируем структуру для отладки
             logger.error(f"Неизвестная структура лайка: {current_like}")
-            await message.answer(
-                "Ошибка при загрузке профиля. Пожалуйста, попробуйте позже.",
+            await message.bot.send_message(
+                chat_id=user_id,
+                text="Ошибка при загрузке профиля. Пожалуйста, попробуйте позже.",
                 reply_markup=back_to_menu_button()
             )
             return
@@ -101,8 +103,9 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
             likes_list.pop(current_index)
             await state.update_data(likes_list=likes_list)
             if not likes_list:
-                await message.answer(
-                    "У вас больше нет непросмотренных лайков.",
+                await message.bot.send_message(
+                    chat_id=user_id,
+                    text="У вас больше нет непросмотренных лайков.",
                     reply_markup=back_to_menu_button()
                 )
                 return
@@ -118,8 +121,9 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
         # Сохраняем ID сообщения для возможного удаления в будущем
         await state.update_data(last_like_message_id=sent_message.message_id)
         
-        # Отмечаем лайк как просмотренный
-        await db.mark_likes_as_viewed(liker_id, user_id)
+        # ВАЖНО: НЕ отмечаем лайк как просмотренный здесь
+        # Лайк должен быть отмечен как просмотренный только после того, как пользователь
+        # выполнит действие (лайк, дизлайк, пропуск)
     except Exception as e:
         logger.error(f"Ошибка при показе профиля лайка: {e}", exc_info=True)
         await message.bot.send_message(
