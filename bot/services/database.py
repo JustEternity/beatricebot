@@ -567,7 +567,7 @@ class Database:
                 if bot:
                     logger.info(f"Отправляем уведомление о лайке от {user_id} к {liked_user_id}")
                     # Импортируем функцию здесь, чтобы избежать циклических импортов
-                    from bot.handlers.algorithm import send_like_notification
+                    from bot.services.notifications import send_like_notification
                     await send_like_notification(bot, user_id, liked_user_id, self)
                 else:
                     logger.warning(f"Объект бота не передан при добавлении лайка от {user_id} к {liked_user_id}")
@@ -1060,7 +1060,6 @@ class Database:
                     user_id,
                     service_id
                 )
-
                 if active_service:
                     logger.warning(f"User {user_id} already has active service {service_id}")
                     return False
@@ -1078,7 +1077,6 @@ class Database:
                 # Проверяем тип serviceduration
                 logger.debug(
                     f"Service duration type: {type(service['serviceduration'])}, value: {service['serviceduration']}")
-
                 if service['serviceduration'] is None:
                     # Если длительность не указана, используем 30 дней по умолчанию
                     end_date = datetime.now() + timedelta(days=30)
@@ -1102,6 +1100,7 @@ class Database:
                 logger.debug(f"Calculated end date: {end_date}")
 
                 # Вставляем запись о покупке услуги
+                # buytime будет установлено автоматически благодаря DEFAULT CURRENT_TIMESTAMP
                 await conn.execute(
                     """
                     INSERT INTO purchasedservices (

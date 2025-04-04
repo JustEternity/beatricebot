@@ -129,7 +129,6 @@ def main_menu(likes_count=0) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=likes_text, callback_data="view_likes")],
             [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")],
             [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")],
-            [InlineKeyboardButton(text="💎 Подписка", callback_data="subscription_info")],
             [InlineKeyboardButton(text="🛒 Услуги", callback_data="view_services")],
             [InlineKeyboardButton(text="Обратная связь", callback_data="send_feedback")]
         ]
@@ -231,6 +230,34 @@ def create_like_keyboard(liker_id):
             InlineKeyboardButton(text="👎 Не нравится", callback_data=f"dislike_user:{liker_id}")
         ],
         [InlineKeyboardButton(text="◀️ Назад в главное меню", callback_data="back_to_menu")]
+    ])
+
+def get_like_notification_keyboard(liker_id: int) -> InlineKeyboardMarkup:
+    # Создает клавиатуру для уведомления о лайке
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="👁️ Посмотреть",
+            callback_data=f"view_liker:{liker_id}"
+        )],
+        [InlineKeyboardButton(
+            text="◀️ В главное меню",
+            callback_data="back_to_menu"
+        )]
+    ])
+
+def get_match_notification_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    # Создает клавиатуру для уведомления о взаимной симпатии
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="💬 Начать общение",
+            url=f"tg://user?id={user_id}"
+        )],
+        [InlineKeyboardButton(
+            text="◀️ В меню",
+            callback_data="back_to_menu"
+        )]
     ])
 
 def subscription_keyboard() -> InlineKeyboardMarkup:

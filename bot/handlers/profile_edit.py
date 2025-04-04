@@ -1,5 +1,6 @@
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InputMediaPhoto, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, \
+    InputMediaPhoto, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.enums import ParseMode
@@ -10,14 +11,21 @@ from bot.services.city_validator import city_validator
 from bot.services.database import Database
 from bot.services.encryption import CryptoService
 from bot.services.s3storage import S3Service
+from bot.services.image_moderator import EnhancedContentDetector
+from bot.services.text_moderator import TextModerator  # Импортируем TextModerator
 from bot.keyboards.menus import edit_profile_keyboard, view_profile, has_answers_keyboard, back_to_menu_button
 from bot.services.utils import delete_previous_messages
 
 from io import BytesIO
 import os
 import logging
+import re
+
 logger = logging.getLogger(__name__)
 router = Router()
+
+# Инициализация модератора текста
+text_moderator = TextModerator()
 
 async def is_photo_available(bot: Bot, file_id: str) -> bool:
     """Упрощенная проверка доступности фото"""
@@ -27,9 +35,11 @@ async def is_photo_available(bot: Bot, file_id: str) -> bool:
     except TelegramBadRequest:
         return False
 
+
 # Просмотр профиля - главное меню
 @router.callback_query(F.data == "view_profile")
-async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database, bot: Bot, s3: S3Service):
+async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database,
+                               bot: Bot, s3: S3Service):
     await delete_previous_messages(callback.message, state)
     user_id = callback.from_user.id
 
@@ -75,9 +85,13 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
     logger.debug(f"Retrieved profile data with keys: {list(user_data.keys())}")
 
     # Декодируем зашифрованные данные
-    name = crypto.decrypt(user_data['name']).decode() if isinstance(crypto.decrypt(user_data['name']), bytes) else crypto.decrypt(user_data['name'])
-    location = crypto.decrypt(user_data['location']).decode() if isinstance(crypto.decrypt(user_data['location']), bytes) else crypto.decrypt(user_data['location'])
-    description = crypto.decrypt(user_data['description']).decode() if isinstance(crypto.decrypt(user_data['description']), bytes) else crypto.decrypt(user_data['description'])
+    name = crypto.decrypt(user_data['name']).decode() if isinstance(crypto.decrypt(user_data['name']),
+                                                                    bytes) else crypto.decrypt(user_data['name'])
+    location = crypto.decrypt(user_data['location']).decode() if isinstance(crypto.decrypt(user_data['location']),
+                                                                            bytes) else crypto.decrypt(
+        user_data['location'])
+    description = crypto.decrypt(user_data['description']).decode() if isinstance(
+        crypto.decrypt(user_data['description']), bytes) else crypto.decrypt(user_data['description'])
 
     # Преобразуем пол в читаемый формат
     gender_value = user_data['gender']
@@ -97,7 +111,6 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         f"*Местоположение:* {location}\n"
         f"*Описание:* {description}"
     )
-
 
     # Если есть фото
     if user_data['photos']:
@@ -131,6 +144,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
     await callback.answer()
     await state.set_state(RegistrationStates.VIEW_PROFILE)
 
+
 # Редактирование профиля - главное меню
 @router.callback_query(F.data == "edit_profile")
 async def edit_profile_handler(callback: CallbackQuery, state: FSMContext):
@@ -141,12 +155,14 @@ async def edit_profile_handler(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+
 async def show_edit_menu(message: Message, state: FSMContext):
     await delete_previous_messages(message, state)
     await message.answer(
         "✏️ Выберите что хотите изменить:",
         reply_markup=edit_profile_keyboard()
     )
+
 
 # Редактирование имени
 @router.callback_query(F.data == "edit_name")
@@ -156,8 +172,15 @@ async def edit_name_handler(callback: CallbackQuery, state: FSMContext):
     await state.set_state(RegistrationStates.EDIT_NAME)
     await callback.answer()
 
+
 @router.message(RegistrationStates.EDIT_NAME)
 async def process_edit_name(message: Message, state: FSMContext, crypto: CryptoService, db: Database):
+    # Проверяем текст через text_moderator
+    is_valid, error_msg = text_moderator.validate_text(message.text)
+    if not is_valid:
+        await message.answer(error_msg)
+        return
+
     encrypted_name = crypto.encrypt(message.text)
 
     if await db.update_user_field(message.from_user.id, name=encrypted_name):
@@ -167,6 +190,7 @@ async def process_edit_name(message: Message, state: FSMContext, crypto: CryptoS
 
     await show_edit_menu(message, state)
 
+
 # Редактирование возраста
 @router.callback_query(F.data == "edit_age")
 async def edit_age_handler(callback: CallbackQuery, state: FSMContext):
@@ -174,6 +198,7 @@ async def edit_age_handler(callback: CallbackQuery, state: FSMContext):
     await state.update_data(edit_message_id=msg.message_id)
     await state.set_state(RegistrationStates.EDIT_AGE)
     await callback.answer()
+
 
 @router.message(RegistrationStates.EDIT_AGE)
 async def process_edit_age(message: Message, state: FSMContext, db: Database):
@@ -191,6 +216,7 @@ async def process_edit_age(message: Message, state: FSMContext, db: Database):
 
     await show_edit_menu(message, state)
 
+
 # Редактирование местоположения
 @router.callback_query(F.data == "edit_location")
 async def edit_location_handler(callback: CallbackQuery, state: FSMContext):
@@ -199,12 +225,19 @@ async def edit_location_handler(callback: CallbackQuery, state: FSMContext):
     await state.set_state(RegistrationStates.EDIT_LOCATION)
     await callback.answer()
 
+
 @router.message(RegistrationStates.EDIT_LOCATION)
 async def process_edit_location(message: Message, state: FSMContext, crypto: CryptoService, db: Database):
+    # Сначала проверяем город через валидатор
     is_valid, normalized_city = city_validator.validate_city(message.text)
-
     if not is_valid:
         await message.answer("⚠️ Город не найден. Пожалуйста, введите существующий российский город")
+        return
+
+    # Затем проверяем текст через text_moderator
+    is_valid, error_msg = text_moderator.validate_text(normalized_city)
+    if not is_valid:
+        await message.answer(error_msg)
         return
 
     encrypted_location = crypto.encrypt(normalized_city)
@@ -216,6 +249,7 @@ async def process_edit_location(message: Message, state: FSMContext, crypto: Cry
 
     await show_edit_menu(message, state)
 
+
 # Редактирование описания
 @router.callback_query(F.data == "edit_description")
 async def edit_description_handler(callback: CallbackQuery, state: FSMContext):
@@ -224,8 +258,15 @@ async def edit_description_handler(callback: CallbackQuery, state: FSMContext):
     await state.set_state(RegistrationStates.EDIT_DESCRIPTION)
     await callback.answer()
 
+
 @router.message(RegistrationStates.EDIT_DESCRIPTION)
 async def process_edit_description(message: Message, state: FSMContext, crypto: CryptoService, db: Database):
+    # Проверяем текст через text_moderator
+    is_valid, error_msg = text_moderator.validate_text(message.text)
+    if not is_valid:
+        await message.answer(error_msg)
+        return
+
     encrypted_description = crypto.encrypt(message.text)
 
     if await db.update_user_field(message.from_user.id, profiledescription=encrypted_description):
@@ -234,6 +275,7 @@ async def process_edit_description(message: Message, state: FSMContext, crypto: 
         await message.answer("❌ Ошибка при обновлении описания")
 
     await show_edit_menu(message, state)
+
 
 # Редактирование фото
 @router.callback_query(F.data == "edit_photos")
@@ -279,12 +321,13 @@ async def edit_photos_handler(
         logger.error(f"Edit photos init error: {str(e)}")
         await callback.answer("❌ Критическая ошибка инициализации", show_alert=True)
 
+
 @router.message(RegistrationStates.EDIT_PHOTOS, F.photo)
 async def process_edit_photos_photo(
-    message: Message,
-    state: FSMContext,
-    bot: Bot,
-    s3: S3Service
+        message: Message,
+        state: FSMContext,
+        bot: Bot,
+        s3: S3Service
 ):
     data = await state.get_data()
     temp_photos = data.get('temp_photos', [])
@@ -300,9 +343,43 @@ async def process_edit_photos_photo(
 
         file_data = BytesIO()
         await bot.download_file(file.file_path, file_data)
-        file_data.seek(0)
 
-        # Загружаем в S3
+        # Сохраняем временный файл для анализа
+        temp_path = f"temp_{message.from_user.id}.jpg"
+        with open(temp_path, "wb") as f:
+            f.write(file_data.getbuffer())
+
+        # Анализируем фото
+        detector = EnhancedContentDetector()
+        result = detector.analyze_image(temp_path)
+
+        # Удаляем временный файл
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+
+        # Проверяем результат модерации
+        if result.get('verdict') == '🔴 BANNED':
+            violations = []
+            if result['violations'].get('nudity'):
+                violations.append("🔞 обнаженные тела/эротика")
+            if result['violations'].get('drugs'):
+                violations.append("💊 наркотики/наркотические средства")
+            if result['violations'].get('weapons'):
+                violations.append("🔫 оружие/опасные предметы")
+            if result['violations'].get('violence'):
+                violations.append("💢 насилие/кровь")
+
+            await message.answer(
+                "⚠️ Фото отклонено модерацией. Причины:\n" +
+                "\n".join(violations) +
+                "\nПожалуйста, отправьте другое фото."
+            )
+            return
+
+        # Если фото прошло модерацию, загружаем его в S3
+        file_data.seek(0)
         s3_url = await s3.upload_photo(file_data, message.from_user.id)
 
         if not s3_url:
@@ -312,7 +389,8 @@ async def process_edit_photos_photo(
         # Сохраняем данные
         temp_photos.append({
             "file_id": file_id,
-            "s3_url": s3_url
+            "s3_url": s3_url,
+            "moderation_result": result
         })
 
         await state.update_data(temp_photos=temp_photos)
@@ -565,6 +643,3 @@ async def finish_test(message: Message, state: FSMContext, db: Database):
 
     # возвращаемся в главное меню
     await state.set_state(RegistrationStates.MAIN_MENU)
-
-
-
