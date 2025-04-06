@@ -6,7 +6,8 @@ from bot.services.database import Database
 from bot.services.algorithm_sovmest import CompatibilityService
 from bot.keyboards.menus import back_to_menu_button
 from bot.handlers.filtres import show_filters_menu
-from bot.services.profile_service import show_compatible_user
+from bot.services.profile_service import show_compatible_user, decrypt_city
+from bot.services.encryption import CryptoService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -71,12 +72,15 @@ async def next_compatible_handler(callback: CallbackQuery, state: FSMContext, db
 
 # Обработчик начала поиска
 @router.callback_query(F.data == "start_search")
-async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
+async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService):
     await callback.answer()
     await callback.message.edit_text("🔍 Ищем совместимых пользователей...")
     
     # Получаем фильтры из состояния
     filters = await state.get_data()
+    
+    # Используем утилиту для дешифрования города
+    city = decrypt_city(crypto, filters.get('filter_city'))
     
     # Создаем сервис совместимости
     compatibility_service = CompatibilityService(db)
@@ -84,14 +88,15 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
     # Ищем пользователей с учетом фильтров
     high_compatible_users, low_compatible_users = await compatibility_service.find_compatible_users(
         user_id=callback.from_user.id,
-        city=filters.get('filter_city'),
+        city=city,
         age_min=filters.get('filter_age_min'),
         age_max=filters.get('filter_age_max'),
         gender=filters.get('filter_gender'),
         occupation=filters.get('filter_occupation'),
         goals=filters.get('filter_goals'),
         limit=10,
-        min_score=50.0
+        min_score=50.0,
+        crypto=crypto  # Передаем объект crypto для шифрования города
     )
     
     # Объединяем результаты

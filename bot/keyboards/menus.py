@@ -148,7 +148,7 @@ def edit_profile_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📝 Имя", callback_data="edit_name"),
              InlineKeyboardButton(text="🔢 Возраст", callback_data="edit_age")],
-            [InlineKeyboardButton(text="📍 Локация", callback_data="edit_location"),
+            [InlineKeyboardButton(text="📍 Город", callback_data="edit_location"),
              InlineKeyboardButton(text="📸 Фото", callback_data="edit_photos")],
             [InlineKeyboardButton(text="📄 Описание", callback_data="edit_description")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]

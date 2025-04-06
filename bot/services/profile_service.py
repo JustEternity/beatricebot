@@ -54,6 +54,21 @@ async def show_profile(
         )
         return error_msg
 
+def decrypt_city(crypto, encrypted_city):
+    if not encrypted_city or not crypto:
+        return encrypted_city
+        
+    try:
+        # Проверяем, является ли город зашифрованным
+        if isinstance(encrypted_city, bytes) or (
+                isinstance(encrypted_city, str) and 
+                (encrypted_city.startswith('b\'gAAAAA') or encrypted_city.startswith('gAAAAA'))):
+            return crypto.decrypt(encrypted_city)
+        return encrypted_city
+    except Exception as e:
+        logger.error(f"Ошибка дешифрования города: {e}")
+        return None
+
 # Показывает профиль пользователя, который поставил лайк
 async def show_like_profile(message: Message, user_id: int, state: FSMContext, db: Database, crypto=None):
     try:
@@ -169,6 +184,10 @@ async def show_compatible_user(message: Message, state: FSMContext, db: Database
         user_profile = current_user['profile']
         compatibility = current_user['compatibility']
         
+        # Дешифруем город в профиле, если он зашифрован
+        if 'location' in user_profile:
+            user_profile['city'] = decrypt_city(crypto, user_profile['location'])
+        
         # Создаём адаптивную клавиатуру
         keyboard = compatible_navigation_keyboard(
             user_id=user_profile['telegramid'],
@@ -184,11 +203,11 @@ async def show_compatible_user(message: Message, state: FSMContext, db: Database
         photos = user_profile.get('photos', [])
         sent_message = await show_profile(
             message, 
-            message.chat.id, 
-            user_profile, 
-            photos, 
-            keyboard, 
-            crypto, 
+            message.chat.id,
+            user_profile,
+            photos,
+            keyboard,
+            crypto,
             additional_text
         )
         

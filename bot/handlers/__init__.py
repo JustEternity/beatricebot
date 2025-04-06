@@ -8,6 +8,7 @@ from .services import router as services_router
 from .admin_funcs import router as admin_router
 from .action_likes import router as likes_router
 from .view_likes import router as likes_menu_router
+from .filtres import router as search_filtres
 
 routers = [
     registration_router,
@@ -18,5 +19,6 @@ routers = [
     admin_router,
     likes_router,
     likes_menu_router,
+    search_filtres,
     common_router
 ]

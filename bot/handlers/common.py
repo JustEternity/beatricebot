@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.services.database import Database
 from bot.keyboards.menus import main_menu, back_to_menu_button as back, policy_keyboard, admin_menu
 from bot.services.utils import delete_previous_messages
+from bot.services.profile_service import decrypt_city
 from bot.services.encryption import CryptoService
 from bot.texts.textforbot import POLICY_TEXT
 from bot.services.s3storage import S3Service
@@ -201,41 +202,96 @@ async def update_main_menu(message, state: FSMContext, db: Database):
         reply_markup=main_menu(likes_count)
     )
 
-async def show_filters_menu(callback: CallbackQuery, state: FSMContext, db: Database):
+async def show_filters_menu(callback_or_message, state: FSMContext, db: Database, crypto: CryptoService = None):
     """Функция для показа меню фильтров"""
+    # Получаем текущие фильтры из состояния
+    filters = await state.get_data()
+    
+    # Определяем ID пользователя в зависимости от типа объекта
+    if isinstance(callback_or_message, CallbackQuery):
+        user_id = callback_or_message.from_user.id
+    else:
+        user_id = callback_or_message.from_user.id
+    
     # Проверяем наличие подписки у пользователя
-    has_subscription = await db.check_user_subscription(callback.from_user.id)
-
+    has_subscription = await db.check_user_subscription(user_id)
+    
+    # Дешифруем город в фильтрах, если он зашифрован
+    city = decrypt_city(crypto, filters.get('filter_city'))
+    if city and city != filters.get('filter_city'):
+        # Обновляем состояние только если город изменился после дешифрования
+        await state.update_data(filter_city=city)
+        filters = await state.get_data()  # Обновляем фильтры
+    
+    # Проверяем, есть ли хотя бы один установленный фильтр
+    has_any_filter = any([
+        filters.get('filter_city'),
+        filters.get('filter_age_min') and filters.get('filter_age_max'),
+        has_subscription and filters.get('filter_occupation'),
+        has_subscription and filters.get('filter_goals')
+    ])
+    
+    # Формируем текст с информацией о текущих фильтрах
+    filter_info = []
+    if filters.get('filter_city'):
+        filter_info.append(f"📍 Город: {filters.get('filter_city')}")
+    if filters.get('filter_age_min') and filters.get('filter_age_max'):
+        filter_info.append(f"🔢 Возраст: {filters.get('filter_age_min')}-{filters.get('filter_age_max')}")
+    if has_subscription:
+        if filters.get('filter_occupation'):
+            filter_info.append(f"💼 Род занятий: {filters.get('filter_occupation')}")
+        if filters.get('filter_goals'):
+            filter_info.append(f"🎯 Цели: {filters.get('filter_goals')}")
+    
     # Создаем клавиатуру с фильтрами
     builder = InlineKeyboardBuilder()
     builder.button(text="📍 Город", callback_data="filter_city")
     builder.button(text="🔢 Возраст", callback_data="filter_age")
-
+    
     # Дополнительные фильтры для подписчиков
     if has_subscription:
         builder.button(text="💼 Род занятий", callback_data="filter_occupation")
         builder.button(text="🎯 Цели знакомства", callback_data="filter_goals")
-
+    
+    # Кнопка сброса фильтров (только если есть хотя бы один фильтр)
+    if has_any_filter:
+        builder.button(text="🔄 Сбросить фильтры", callback_data="reset_filters")
+    
+    # Кнопка поиска для всех пользователей
     builder.button(text="🔍 Начать поиск", callback_data="start_search")
     builder.button(text="◀️ Назад", callback_data="back_to_menu")
-    builder.adjust(2)  # По 2 кнопки в ряду
-
-    text = "⚙️ Выберите фильтры для поиска:" if has_subscription else \
-           "⚙️ Доступные фильтры (для подписки больше фильтров):"
-
-    # Удаляем предыдущее сообщение, если есть
-    data = await state.get_data()
-    if 'last_message_id' in data:
-        try:
-            await callback.bot.delete_message(callback.message.chat.id, data['last_message_id'])
-        except:
-            pass
-
-    msg = await callback.message.answer(
-        text,
-        reply_markup=builder.as_markup()
-    )
-    await state.update_data(last_message_id=msg.message_id)
+    
+    # Настраиваем расположение кнопок
+    if has_subscription:
+        builder.adjust(2, 2, 1, 1)  # Основные фильтры по 2 в ряд, доп. кнопки по 1
+    else:
+        builder.adjust(2, 1, 1)  # Основные фильтры по 2 в ряд, доп. кнопки по 1
+    
+    # Формируем основной текст сообщения
+    base_text = "⚙️ Выберите фильтры для поиска:" if has_subscription else \
+               "⚙️ Доступные фильтры (для подписки больше фильтров):"
+    
+    # Добавляем информацию о текущих фильтрах, если они есть
+    if filter_info:
+        text = f"{base_text}\n\n<b>Текущие фильтры:</b>\n" + "\n".join(filter_info)
+    else:
+        text = base_text
+    
+    # Проверяем тип объекта callback_or_message
+    if isinstance(callback_or_message, CallbackQuery):
+        # Это CallbackQuery
+        await callback_or_message.message.edit_text(
+            text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    else:
+        # Это Message
+        await callback_or_message.answer(
+            text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
 
 @router.callback_query(F.data == "send_feedback")
 async def send_feedback_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database, bot: Bot, s3: S3Service):
@@ -286,7 +342,21 @@ async def feedback_text_handler(message: Message, state: FSMContext, db: Databas
 @router.message()
 async def unexpected_messages_handler(message: Message, state: FSMContext, db: Database):
     current_state = await state.get_state()
-    logger.debug(f"Received policy response: {message.text}")
+    logger.debug(f"Received message in state {current_state}: {message.text}")
+    
+    # Проверяем, не находится ли пользователь в состоянии установки фильтров
+    filter_states = [
+        RegistrationStates.SET_FILTER_CITY.state,
+        RegistrationStates.SET_FILTER_AGE.state,
+        RegistrationStates.SET_FILTER_GENDER.state,
+        RegistrationStates.SET_FILTER_OCCUPATION.state,
+        RegistrationStates.SET_FILTER_GOALS.state
+    ]
+    
+    if current_state in filter_states:
+        # Пропускаем обработку, чтобы сообщение обработали соответствующие обработчики
+        return
+        
     if current_state is None:
         # Получаем количество непросмотренных лайков
         likes_count = await db.get_unviewed_likes_count(message.from_user.id)
@@ -299,6 +369,7 @@ async def unexpected_messages_handler(message: Message, state: FSMContext, db: D
             "Пожалуйста, завершите текущее действие "
             "или нажмите /cancel для отмены."
         )
+
 
 async def get_user_profile(
     user_id: int,
@@ -373,7 +444,7 @@ async def get_user_profile(
             f"▪️ Имя: {decrypted_fields['name']}\n"
             f"▪️ Возраст: {user_data['age']}\n"
             f"▪️ Пол: {gender}\n"
-            f"▪️ Локация: {decrypted_fields['location']}\n"
+            f"▪️ Город: {decrypted_fields['location']}\n"
             f"▪️ Описание: {decrypted_fields['description']}"
         )
 
