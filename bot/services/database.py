@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+import json
 import asyncpg
 import logging
 from datetime import datetime, timedelta
@@ -1334,21 +1335,26 @@ class Database:
             logger.exception(e)
             return None
 
-    async def exec_report(self, query: str, *args) -> dict:
+    async def exec_report(self, admin_id: int, report_id: int,  query: str, *args) -> dict:
         """
         Выполняет SQL-запрос и возвращает результат в формате словаря
         :param query: SQL-запрос
         :param args: Параметры для запроса (опционально)
         :return: Словарь с результатами или ошибкой
         """
-
+        result = []
         try:
             async with self.pool.acquire() as conn:
                 records = await conn.fetch(query, *args)
                 result = [dict(record) for record in records]
 
+                json_data = json.dumps(result, ensure_ascii=False)
+
+                q = "INSERT INTO statistics (admintelegramid, reporttypeid, reportdata) VALUES ($1, $2, $3)"
+                await conn.execute(q, admin_id, report_id, json_data)
+
         except Exception as e:
-            result['error'] = str(e)
+            result.append({"error": str(e)})
             logger.error(f"Query execution failed: {e}\nQuery: {query}")
 
         return result

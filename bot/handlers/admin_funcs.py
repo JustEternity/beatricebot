@@ -36,7 +36,7 @@ async def get_active_users_handler(callback: CallbackQuery, state: FSMContext, d
     await delete_previous_messages(callback.message, state)
     data = await state.get_data()
     reports = data.get('reports')
-    res = await db.exec_report(reports[1])
+    res = await db.exec_report(admin_id=callback.from_user.id, report_id=1, query=reports[1])
     message_text = '📊 Отчет по активным пользователям:\n\n'
     message_text = f'Активных пользователей за последний месяц: {res[0].get("active_users_count", 0)}'
 
@@ -77,7 +77,7 @@ async def input_year_for_count_of_regs_report(message: Message, state: FSMContex
                 "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
             ]
 
-        res = await db.exec_report(reports[3], year)
+        res = await db.exec_report(message.from_user.id, 3, reports[3], year)
         message_text = f'📊 Отчет по активным пользователям за {year} год:\n\n'
         total = 0
         for entry in res:
@@ -101,7 +101,7 @@ async def admin_results_handler(callback: CallbackQuery, state: FSMContext, db: 
     await delete_previous_messages(callback.message, state)
     data = await state.get_data()
     reports = data.get('reports')
-    res = await db.exec_report(reports[4], callback.from_user.id)
+    res = await db.exec_report(callback.from_user.id, 4, reports[4], callback.from_user.id)
     message_text = '📊 Отчет по работе администратора за текущий месяц:\n\n'
 
     message_text += f'Обработано жалоб: {res[0].get("processed_complaints", 0)}\n'
@@ -146,7 +146,7 @@ async def input_year_for_purchased_services_report(message: Message, state: FSMC
                 "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
             ]
 
-        res = await db.exec_report(reports[5], year)
+        res = await db.exec_report(message.from_user.id, 5, reports[5], year)
         message_text = f'📊 Отчет по купленным услугам за {year} год:\n\n'
         total = 0
         for entry in res:
