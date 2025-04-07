@@ -1552,3 +1552,19 @@ class Database:
             logger.error(f"Ошибка при проверке верификации пользователя {user_id}: {e}")
             logger.exception(e)
             return False
+
+    async def del_user(self, user_id: int):
+        """Удаляет всю информацию о пользователе"""
+        logger.info(f'Удаление данных о пользователе {user_id}')
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                    DELETE FROM users WHERE telegramid=$1;
+                """
+                result = await conn.execute(query, user_id)
+                return bool(result)
+
+        except Exception as e:
+            logger.error(f"Ошибка при удалении пользователя {user_id}: {e}")
+            logger.exception(e)
+            return False

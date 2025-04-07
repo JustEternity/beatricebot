@@ -13,7 +13,7 @@ from bot.services.encryption import CryptoService
 from bot.services.s3storage import S3Service
 from bot.services.image_moderator import EnhancedContentDetector
 from bot.services.text_moderator import TextModerator  # Импортируем TextModerator
-from bot.keyboards.menus import edit_profile_keyboard, view_profile, has_answers_keyboard, back_to_menu_button
+from bot.keyboards.menus import edit_profile_keyboard, view_profile, has_answers_keyboard, back_to_menu_button, accept_deletion
 from bot.services.utils import delete_previous_messages
 
 from io import BytesIO
@@ -155,6 +155,25 @@ async def edit_profile_handler(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+@router.callback_query(F.data == "delete_account")
+async def delete_account_handler(callback: CallbackQuery, state: FSMContext):
+    await delete_previous_messages(callback.message, state)
+    await callback.message.edit_text(
+        "Вы уверены что хотите удалить анкету?\n***\nПосле удаления восстановить её будет невозможно, а все оплаченные услуги перестанут действовать\n***",
+        reply_markup=accept_deletion()
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "agree_del")
+async def delete_account_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    await delete_previous_messages(callback.message, state)
+    res = await db.del_user(callback.from_user.id)
+    if res:
+        await callback.message.answer("✅ Все ваши данные удалены. Для нового использования бота нажмите /start", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+    else:
+        await callback.message.edit_text("⚠️ При удалении ваших данных возникла ошибка, попробуйте позже", reply_markup=back_to_menu_button())
+    await callback.answer()
 
 async def show_edit_menu(message: Message, state: FSMContext):
     await delete_previous_messages(message, state)

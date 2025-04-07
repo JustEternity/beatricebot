@@ -180,8 +180,18 @@ def view_profile() -> InlineKeyboardMarkup:
     """Меню просмотра профиля"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu"),
-             InlineKeyboardButton(text="✏️ Изменить анкету", callback_data="edit_profile")],
+            [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="✏️ Изменить анкету", callback_data="edit_profile")],
+            [InlineKeyboardButton(text="Удалить анкету", callback_data="delete_account")],
+        ]
+    )
+
+def accept_deletion() -> InlineKeyboardMarkup:
+    """Меню подтверждения удаления аккаунта"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Да", callback_data="agree_del"),
+             InlineKeyboardButton(text="Нет", callback_data="back_to_menu")],
         ]
     )
 
