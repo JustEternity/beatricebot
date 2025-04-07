@@ -1460,6 +1460,7 @@ class Database:
 
     async def update_verification(
         self,
+        admin_id: int,
         verification_id: int,
         status: str,  # 'approved' или 'rejected'
         rejection_reason: str = None
@@ -1471,9 +1472,10 @@ class Database:
                     UPDATE verifications
                     SET processingstatus = $1,
                         rejectionreason = $2,
-                        verificationdate = NOW()
+                        verificationdate = NOW(),
+                        admintelegramid = $4
                     WHERE verificationid = $3
-                """, status, rejection_reason, verification_id)
+                """, status, rejection_reason, verification_id, admin_id)
         except Exception as e:
             logger.error(f"Ошибка обновления верификации: {e}")
 

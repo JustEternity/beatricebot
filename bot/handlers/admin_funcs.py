@@ -375,19 +375,26 @@ async def show_next_verif(message: Message, state: FSMContext, db: Database):
 
     verification_id, data = verifs_list[current_idx]
 
-    # Отправляем видео
-    msg = await message.answer_video(
-        video=data[0],
-        caption=f"Верификация #{verification_id}",
-        reply_markup=verify_decisions()
-    )
+    try:
+        # Отправляем видео
+        msg = await message.answer_video(
+            video=data[0],
+            caption=f"Верификация #{verification_id}",
+            reply_markup=verify_decisions()
+        )
 
-    await state.update_data(
-        current_verification_id=verification_id,
-        last_message_id=msg.message_id,
-        current_ver_index=current_idx + 1,
-        current_user = data[1]
-    )
+        # Обновляем индекс после отправки
+        await state.update_data(
+            current_verification_id=verification_id,
+            last_message_id=msg.message_id,
+            current_ver_index=current_idx + 1,
+            current_user=data[1]
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка отображения верификации: {e}")
+        await message.answer("⚠ Ошибка при загрузке видео")
+        await show_next_verif(message, state, db)
 
 @router.callback_query(F.data == "verify_block")
 async def handle_block(callback: CallbackQuery, state: FSMContext):
@@ -402,6 +409,7 @@ async def process_rejection_verify(message: Message, state: FSMContext, db: Data
 
     # Обновляем верификацию
     await db.update_verification(
+        admin_id=message.from_user.id,
         verification_id=data['current_verification_id'],
         status='rejected',
         rejection_reason=reason
@@ -417,9 +425,10 @@ async def process_rejection_verify(message: Message, state: FSMContext, db: Data
     await show_next_verif(message, state, db)
 
 @router.callback_query(F.data == "verify_skip")
-async def handle_block(callback: CallbackQuery, state: FSMContext, db: Database):
+async def handle_skip(callback: CallbackQuery, state: FSMContext, db: Database):
     data = await state.get_data()
     await db.update_verification(
+        admin_id=callback.from_user.id,
         verification_id=data['current_verification_id'],
         status='approve'
     )
@@ -431,7 +440,7 @@ async def handle_block(callback: CallbackQuery, state: FSMContext, db: Database)
         )
 
     await callback.answer(f"✅ Верификация пройдена")
-    await show_next_verif(callback, state, db)
+    await show_next_verif(callback.message, state, db)
 
 
 @router.callback_query(F.data == "admin_moderations")
