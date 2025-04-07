@@ -1574,3 +1574,9 @@ class Database:
             logger.error(f"Ошибка при удалении пользователя {user_id}: {e}")
             logger.exception(e)
             return False
+
+    async def is_user_blocked(self, user_id: int) -> bool:
+        """Проверяет, заблокирован ли пользователь"""
+        async with self.pool.acquire() as conn:
+            query = "SELECT EXISTS(SELECT 1 FROM users WHERE telegramid = $1 and accountstatus='blocked')"
+            return await conn.fetchval(query, user_id)

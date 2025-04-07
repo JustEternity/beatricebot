@@ -44,7 +44,9 @@ async def main():
             "s3": s3
         })
 
-        dp.update.outer_middleware(DependencyInjectionMiddleware(dp))
+        #dp.update.outer_middleware(DependencyInjectionMiddleware(dp))
+        dp.message.middleware(DependencyInjectionMiddleware(dp))
+        dp.callback_query.middleware(DependencyInjectionMiddleware(dp))
 
         # Подключение роутеров
         for router in routers:
