@@ -206,23 +206,23 @@ async def show_filters_menu(callback_or_message, state: FSMContext, db: Database
     """Функция для показа меню фильтров"""
     # Получаем текущие фильтры из состояния
     filters = await state.get_data()
-    
+
     # Определяем ID пользователя в зависимости от типа объекта
     if isinstance(callback_or_message, CallbackQuery):
         user_id = callback_or_message.from_user.id
     else:
         user_id = callback_or_message.from_user.id
-    
+
     # Проверяем наличие подписки у пользователя
     has_subscription = await db.check_user_subscription(user_id)
-    
+
     # Дешифруем город в фильтрах, если он зашифрован
     city = decrypt_city(crypto, filters.get('filter_city'))
     if city and city != filters.get('filter_city'):
         # Обновляем состояние только если город изменился после дешифрования
         await state.update_data(filter_city=city)
         filters = await state.get_data()  # Обновляем фильтры
-    
+
     # Проверяем, есть ли хотя бы один установленный фильтр
     has_any_filter = any([
         filters.get('filter_city'),
@@ -230,7 +230,7 @@ async def show_filters_menu(callback_or_message, state: FSMContext, db: Database
         has_subscription and filters.get('filter_occupation'),
         has_subscription and filters.get('filter_goals')
     ])
-    
+
     # Формируем текст с информацией о текущих фильтрах
     filter_info = []
     if filters.get('filter_city'):
@@ -242,41 +242,41 @@ async def show_filters_menu(callback_or_message, state: FSMContext, db: Database
             filter_info.append(f"💼 Род занятий: {filters.get('filter_occupation')}")
         if filters.get('filter_goals'):
             filter_info.append(f"🎯 Цели: {filters.get('filter_goals')}")
-    
+
     # Создаем клавиатуру с фильтрами
     builder = InlineKeyboardBuilder()
     builder.button(text="📍 Город", callback_data="filter_city")
     builder.button(text="🔢 Возраст", callback_data="filter_age")
-    
+
     # Дополнительные фильтры для подписчиков
     if has_subscription:
         builder.button(text="💼 Род занятий", callback_data="filter_occupation")
         builder.button(text="🎯 Цели знакомства", callback_data="filter_goals")
-    
+
     # Кнопка сброса фильтров (только если есть хотя бы один фильтр)
     if has_any_filter:
         builder.button(text="🔄 Сбросить фильтры", callback_data="reset_filters")
-    
+
     # Кнопка поиска для всех пользователей
     builder.button(text="🔍 Начать поиск", callback_data="start_search")
     builder.button(text="◀️ Назад", callback_data="back_to_menu")
-    
+
     # Настраиваем расположение кнопок
     if has_subscription:
         builder.adjust(2, 2, 1, 1)  # Основные фильтры по 2 в ряд, доп. кнопки по 1
     else:
         builder.adjust(2, 1, 1)  # Основные фильтры по 2 в ряд, доп. кнопки по 1
-    
+
     # Формируем основной текст сообщения
     base_text = "⚙️ Выберите фильтры для поиска:" if has_subscription else \
                "⚙️ Доступные фильтры (для подписки больше фильтров):"
-    
+
     # Добавляем информацию о текущих фильтрах, если они есть
     if filter_info:
         text = f"{base_text}\n\n<b>Текущие фильтры:</b>\n" + "\n".join(filter_info)
     else:
         text = base_text
-    
+
     # Проверяем тип объекта callback_or_message
     if isinstance(callback_or_message, CallbackQuery):
         # Это CallbackQuery
@@ -338,12 +338,71 @@ async def feedback_text_handler(message: Message, state: FSMContext, db: Databas
         await message.answer("❌ Произошла ошибка при сохранении отзыва")
     await state.clear()
 
+@router.callback_query(F.data == "start_verification")
+async def start_verification_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    await delete_previous_messages(callback.message, state)
+    await state.clear()
+    have_sub = await db.check_user_subscription(callback.from_user.id)
+    already_verify = await db.check_verify(callback.from_user.id)
+    if not have_sub:
+        msg = await callback.message.answer(
+            "Прохождение верификации доступно только пользователям с подпиской",
+            reply_markup=back()
+        )
+        await state.set_state(RegistrationStates.MAIN_MENU)
+    elif have_sub and not already_verify:
+        msg = await callback.message.answer(
+            "Отправьте видеосообщение для верификации:",
+            reply_markup=back()
+        )
+        await state.set_state(RegistrationStates.VERIFICATION)
+    else:
+        msg = await callback.message.answer(
+            "Вы уже отправили видео для верификации,\nесли вам не пришел ответ о результате,\nотправьте сообщение обратной связи:",
+            reply_markup=back()
+        )
+        await state.set_state(RegistrationStates.MAIN_MENU)
+    await state.update_data(edit_message_id=msg.message_id)
+    await callback.answer()
+
+@router.message(RegistrationStates.VERIFICATION, F.video_note)
+async def virification_handler(message: Message, state: FSMContext, db: Database):
+    video_note = message.video_note
+    video_file_id = video_note.file_id
+
+    try:
+        # Сохраняем file_id видеосообщения в базу данных
+        success = await db.save_verification_video(
+            user_id=message.from_user.id,
+            video_file_id=video_file_id  # Передаем file_id видео
+        )
+
+        # Получаем количество непросмотренных лайков
+        likes_count = await db.get_unviewed_likes_count(message.from_user.id)
+
+        # Отправляем подтверждение
+        if success:
+            await message.answer(
+                "✅ Спасибо за ваше видеосообщение! Мы рассмотрим его в ближайшее время.",
+                reply_markup=main_menu(likes_count)
+            )
+        else:
+            await message.answer(
+                "❌ Приносим свои извинения, произошла ошибка.\nПопробуйте позже",
+                reply_markup=main_menu(likes_count)
+            )
+    except Exception as e:
+        logger.error(f"Ошибка сохранения видеосообщения: {str(e)}")
+        await message.answer("❌ Произошла ошибка при сохранении видеосообщения",
+                reply_markup=main_menu(likes_count))
+    await state.clear()
+
 # Обработчик любых неожиданных сообщений
 @router.message()
 async def unexpected_messages_handler(message: Message, state: FSMContext, db: Database):
     current_state = await state.get_state()
     logger.debug(f"Received message in state {current_state}: {message.text}")
-    
+
     # Проверяем, не находится ли пользователь в состоянии установки фильтров
     filter_states = [
         RegistrationStates.SET_FILTER_CITY.state,
@@ -352,11 +411,11 @@ async def unexpected_messages_handler(message: Message, state: FSMContext, db: D
         RegistrationStates.SET_FILTER_OCCUPATION.state,
         RegistrationStates.SET_FILTER_GOALS.state
     ]
-    
+
     if current_state in filter_states:
         # Пропускаем обработку, чтобы сообщение обработали соответствующие обработчики
         return
-        
+
     if current_state is None:
         # Получаем количество непросмотренных лайков
         likes_count = await db.get_unviewed_likes_count(message.from_user.id)

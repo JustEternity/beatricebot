@@ -26,5 +26,4 @@ class Config(BaseSettings):
 
 def load_config():
     config = Config()
-    logger.debug(f"Loaded config: {config.dict()}")
     return config

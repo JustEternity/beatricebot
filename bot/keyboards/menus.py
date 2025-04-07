@@ -130,6 +130,7 @@ def main_menu(likes_count=0) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")],
             [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")],
             [InlineKeyboardButton(text="🛒 Услуги", callback_data="view_services")],
+            [InlineKeyboardButton(text="Пройти верификацию", callback_data="start_verification")],
             [InlineKeyboardButton(text="Обратная связь", callback_data="send_feedback")]
         ]
     )

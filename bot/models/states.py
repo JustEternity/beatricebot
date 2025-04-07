@@ -10,6 +10,7 @@ class RegistrationStates(StatesGroup):
     LOCATION = State()         # Ввод местоположения
     PHOTOS = State()           # Загрузка фотографий
     DESCRIPTION = State()      # Ввод описания
+    VERIFICATION = State()     # Отправка видео для верификации
     MAIN_MENU = State()        # Главное меню после регистрации
 
     ADMIN_AUTH = State()  # Состояние для ввода пароля админа
@@ -31,7 +32,7 @@ class RegistrationStates(StatesGroup):
     EDIT_PHOTOS = State()      # Редактирование фотографий
     EDIT_DESCRIPTION = State() # Редактирование описания
 
-    FILTERS = State()   
+    FILTERS = State()
     SET_FILTER_CITY = State()
     SET_FILTER_AGE = State()
     SET_FILTER_GENDER = State()
