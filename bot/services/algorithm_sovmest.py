@@ -51,7 +51,9 @@ class CompatibilityService:
         gender: str = None,
         occupation: str = None,
         goals: str = None,
-        limit: int = 5,
+        filter_test_question: int = None,
+        filter_test_answer: int = None,
+        limit: int = 10,
         min_score: float = 50.0,
         crypto=None
     ) -> Tuple[List[Dict], List[Dict]]:
@@ -66,21 +68,31 @@ class CompatibilityService:
             gender: Фильтр по полу
             occupation: Фильтр по роду занятий
             goals: Фильтр по целям знакомства
+            filter_test_question: ID вопроса для фильтрации по интересам
+            filter_test_answer: ID ответа для фильтрации по интересам (1 - первый вариант, 2 - второй вариант и т.д.)
             limit: Максимальное количество результатов
             min_score: Минимальный процент совместимости
             crypto: Сервис шифрования для дешифрования данных
-        
+            
         Returns:
             Tuple[List[Dict], List[Dict]]: Два списка пользователей -
             с высокой и низкой совместимостью
         """
-        logger.debug(f"Finding compatible users for {user_id}, filters: city={city}, age={age_min}-{age_max}, gender={gender}, occupation={occupation}, goals={goals}")
+        logger.debug(f"Finding compatible users for {user_id}, filters: city={city}, age={age_min}-{age_max}, gender={gender}, occupation={occupation}, goals={goals}, test_question={filter_test_question}, test_answer={filter_test_answer}")
+        
+        # Преобразуем параметры фильтрации в целые числа, если они не None
+        if filter_test_question is not None:
+            filter_test_question = int(filter_test_question)
+        if filter_test_answer is not None:
+            filter_test_answer = int(filter_test_answer)
         
         # Получаем ответы текущего пользователя
         user_answers = await self.get_user_answers(user_id)
         if not user_answers:
             logger.debug("User has no answers")
             return [], []
+        
+        logger.debug(f"Current user answers: {user_answers}")
         
         # Получаем профиль текущего пользователя для определения пола и предпочтений
         current_user_profile = await self.db.get_user_profile(user_id)
@@ -115,12 +127,11 @@ class CompatibilityService:
         else:
             user_city = city
         
-        # Строим базовый запрос для получения пользователей БЕЗ фильтра по городу
+        # Строим базовый запрос для получения пользователей
         query = """
-            SELECT u.telegramid, u.name, u.age, u.gender, u.city as location,
+            SELECT DISTINCT u.telegramid, u.name, u.age, u.gender, u.city as location,
                 u.profiledescription as description
             FROM users u
-            JOIN useranswers ua ON u.telegramid = ua.usertelegramid
             WHERE u.telegramid != $1
         """
         params = [user_id]
@@ -132,7 +143,7 @@ class CompatibilityService:
         elif current_user_gender == '1':  # Женщина ищет мужчин
             query += f" AND u.gender = '0'"
         
-        # Добавляем остальные фильтры (кроме города)
+        # Добавляем остальные фильтры (кроме города и интересов)
         if age_min is not None and age_max is not None:
             query += f" AND u.age BETWEEN ${param_index} AND ${param_index + 1}"
             params.extend([age_min, age_max])
@@ -153,16 +164,81 @@ class CompatibilityService:
             params.append(goals)
             param_index += 1
         
-        # Добавляем группировку по пользователю
-        query += " GROUP BY u.telegramid"
+        # Если есть фильтр по интересам, добавляем JOIN с таблицей useranswers
+        if filter_test_question is not None and filter_test_answer is not None:
+            # Получаем реальный ID ответа из таблицы answers
+            # filter_test_answer - это порядковый номер ответа (1, 2, 3...), 
+            # а не его ID в таблице answers
+            answers_query = """
+                SELECT answerid FROM answers 
+                WHERE questionid = $1
+                ORDER BY answerid
+            """
+            answers = await self.db.pool.fetch(answers_query, filter_test_question)
+            logger.debug(f"Available answers for question {filter_test_question}: {[a['answerid'] for a in answers]}")
+            
+            if answers and 0 <= filter_test_answer - 1 < len(answers):
+                # Преобразуем порядковый номер ответа в его реальный ID
+                real_answer_id = answers[filter_test_answer - 1]['answerid']
+                logger.debug(f"Converted answer index {filter_test_answer} to real answer ID {real_answer_id}")
+            else:
+                # Если не можем найти ответ по индексу, используем первый доступный
+                if answers:
+                    real_answer_id = answers[0]['answerid']
+                    logger.debug(f"Using first available answer ID: {real_answer_id}")
+                else:
+                    logger.debug(f"No answers found for question {filter_test_question}")
+                    return [], []
+            
+            query = """
+                SELECT DISTINCT u.telegramid, u.name, u.age, u.gender, u.city as location,
+                    u.profiledescription as description
+                FROM users u
+                JOIN useranswers ua ON u.telegramid = ua.usertelegramid
+                WHERE u.telegramid != $1
+                AND ua.questionid = $2 AND ua.answerid = $3
+            """
+            params = [user_id, filter_test_question, real_answer_id]
+            param_index = 4
+            
+            # Добавляем фильтр по полу
+            if current_user_gender == '0':  # Мужчина ищет женщин
+                query += f" AND u.gender = '1'"
+            elif current_user_gender == '1':  # Женщина ищет мужчин
+                query += f" AND u.gender = '0'"
+            
+            # Добавляем остальные фильтры
+            if age_min is not None and age_max is not None:
+                query += f" AND u.age BETWEEN ${param_index} AND ${param_index + 1}"
+                params.extend([age_min, age_max])
+                param_index += 2
+            
+            if gender is not None:
+                query += f" AND u.gender = ${param_index}"
+                params.append(gender)
+                param_index += 1
+            
+            if occupation is not None:
+                query += f" AND u.occupation = ${param_index}"
+                params.append(occupation)
+                param_index += 1
+            
+            if goals is not None:
+                query += f" AND u.goals = ${param_index}"
+                params.append(goals)
+                param_index += 1
         
         # Выполняем запрос
         try:
             candidates = await self.db.pool.fetch(query, *params)
-            logger.debug(f"Found {len(candidates)} candidates before city filtering")
+            logger.debug(f"Found {len(candidates)} candidates")
             
             if not candidates:
                 return [], []
+            
+            # Выводим ID найденных кандидатов для отладки
+            candidate_ids = [c['telegramid'] for c in candidates]
+            logger.debug(f"Candidate IDs: {candidate_ids}")
             
             # Фильтруем по городу после получения результатов, если указан город
             filtered_candidates = []
@@ -201,10 +277,12 @@ class CompatibilityService:
                 # Получаем ответы кандидата
                 candidate_answers = await self.get_user_answers(candidate['telegramid'])
                 if not candidate_answers:
+                    logger.debug(f"Candidate {candidate['telegramid']} has no answers, skipping")
                     continue
                 
                 # Вычисляем совместимость
                 compatibility = self.calculate_compatibility(user_answers, candidate_answers)
+                logger.debug(f"Compatibility with {candidate['telegramid']}: {compatibility}%")
                 
                 # Получаем фотографии пользователя
                 photos = await self.db.get_user_photos(candidate['telegramid'])

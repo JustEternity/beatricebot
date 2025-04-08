@@ -30,11 +30,10 @@ async def handle_error(message: Message, text: str):
 
 # Обработчик для поиска совместимых пользователей
 @router.callback_query(F.data == "find_compatible")
-async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService):
     """Обработчик поиска совместимых пользователей"""
     try:
         await callback.answer()
-
         # Проверяем, прошел ли пользователь тест
         has_answers = await db.check_existing_answers(callback.from_user.id)
         if not has_answers:
@@ -47,9 +46,9 @@ async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db
             )
             await state.update_data(last_message_id=msg.message_id)
             return
-
-        await show_filters_menu(callback, state, db)
-
+        
+        # Добавляем параметр crypto при вызове show_filters_menu
+        await show_filters_menu(callback, state, db, crypto)
     except Exception as e:
         logger.error(f"Ошибка в find_compatible_handler: {e}")
         await callback.message.answer("⚠️ Произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -85,6 +84,32 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
     # Создаем сервис совместимости
     compatibility_service = CompatibilityService(db)
     
+    # Получаем список интересов для фильтрации
+    selected_interests = filters.get('filter_interests', [])
+    
+    # Словарь соответствия интересов вопросам и ответам
+    interests_mapping = {
+        "active": {"question": 2, "answer": 1},
+        "travel": {"question": 3, "answer": 1},
+        "sport": {"question": 4, "answer": 1},
+        "animals": {"question": 5, "answer": 1},
+        "art": {"question": 6, "answer": 1},
+        "parties": {"question": 8, "answer": 2},
+        "space": {"question": 9, "answer": 1},
+        "serious": {"question": 1, "answer": 1}
+    }
+    
+    # Если выбраны интересы, берем первый из списка для фильтрации
+    filter_test_question = None
+    filter_test_answer = None
+    
+    if selected_interests:
+        # Берем первый интерес из списка для фильтрации
+        first_interest = selected_interests[0]
+        if first_interest in interests_mapping:
+            filter_test_question = interests_mapping[first_interest]["question"]
+            filter_test_answer = interests_mapping[first_interest]["answer"]
+    
     # Ищем пользователей с учетом фильтров
     high_compatible_users, low_compatible_users = await compatibility_service.find_compatible_users(
         user_id=callback.from_user.id,
@@ -94,6 +119,8 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
         gender=filters.get('filter_gender'),
         occupation=filters.get('filter_occupation'),
         goals=filters.get('filter_goals'),
+        filter_test_question=filter_test_question,
+        filter_test_answer=filter_test_answer,
         limit=10,
         min_score=50.0,
         crypto=crypto  # Передаем объект crypto для шифрования города

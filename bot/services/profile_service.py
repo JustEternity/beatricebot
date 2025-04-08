@@ -55,9 +55,10 @@ async def show_profile(
         return error_msg
 
 def decrypt_city(crypto, encrypted_city):
-    if not encrypted_city or not crypto:
+    """Дешифрует город, если он зашифрован"""
+    if not encrypted_city or encrypted_city == 'Не задан' or not crypto:
         return encrypted_city
-        
+    
     try:
         # Проверяем, является ли город зашифрованным
         if isinstance(encrypted_city, bytes) or (
@@ -66,8 +67,8 @@ def decrypt_city(crypto, encrypted_city):
             return crypto.decrypt(encrypted_city)
         return encrypted_city
     except Exception as e:
-        logger.error(f"Ошибка дешифрования города: {e}")
-        return None
+        logger.error(f"Ошибка при дешифровании города: {e}")
+        return encrypted_city
 
 # Показывает профиль пользователя, который поставил лайк
 async def show_like_profile(message: Message, user_id: int, state: FSMContext, db: Database, crypto=None):

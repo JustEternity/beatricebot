@@ -202,95 +202,89 @@ async def update_main_menu(message, state: FSMContext, db: Database):
         reply_markup=main_menu(likes_count)
     )
 
-async def show_filters_menu(callback_or_message, state: FSMContext, db: Database, crypto: CryptoService = None):
-    """Функция для показа меню фильтров"""
-    # Получаем текущие фильтры из состояния
-    filters = await state.get_data()
-
-    # Определяем ID пользователя в зависимости от типа объекта
-    if isinstance(callback_or_message, CallbackQuery):
-        user_id = callback_or_message.from_user.id
+async def show_filters_menu(source, state: FSMContext, db: Database, crypto: CryptoService):
+    """Показывает меню фильтров"""
+    data = await state.get_data()
+    
+    # Получаем текущие значения фильтров
+    filter_city = data.get('filter_city', 'Не задан')
+    filter_age_min = data.get('filter_age_min')
+    filter_age_max = data.get('filter_age_max')
+    
+    # Получаем информацию о фильтрах по интересам
+    filter_interests = data.get('filter_interests', [])
+    
+    # Формируем текст с текущими фильтрами
+    filters_text = "🔍 Текущие фильтры поиска:\n\n"
+    
+    # Город
+    if filter_city != 'Не задан' and crypto:
+        try:
+            decrypted_city = decrypt_city(crypto, filter_city)
+            filters_text += f"🏙️ Город: {decrypted_city}\n"
+        except:
+            filters_text += f"🏙️ Город: {filter_city}\n"
     else:
-        user_id = callback_or_message.from_user.id
-
-    # Проверяем наличие подписки у пользователя
-    has_subscription = await db.check_user_subscription(user_id)
-
-    # Дешифруем город в фильтрах, если он зашифрован
-    city = decrypt_city(crypto, filters.get('filter_city'))
-    if city and city != filters.get('filter_city'):
-        # Обновляем состояние только если город изменился после дешифрования
-        await state.update_data(filter_city=city)
-        filters = await state.get_data()  # Обновляем фильтры
-
-    # Проверяем, есть ли хотя бы один установленный фильтр
-    has_any_filter = any([
-        filters.get('filter_city'),
-        filters.get('filter_age_min') and filters.get('filter_age_max'),
-        has_subscription and filters.get('filter_occupation'),
-        has_subscription and filters.get('filter_goals')
-    ])
-
-    # Формируем текст с информацией о текущих фильтрах
-    filter_info = []
-    if filters.get('filter_city'):
-        filter_info.append(f"📍 Город: {filters.get('filter_city')}")
-    if filters.get('filter_age_min') and filters.get('filter_age_max'):
-        filter_info.append(f"🔢 Возраст: {filters.get('filter_age_min')}-{filters.get('filter_age_max')}")
-    if has_subscription:
-        if filters.get('filter_occupation'):
-            filter_info.append(f"💼 Род занятий: {filters.get('filter_occupation')}")
-        if filters.get('filter_goals'):
-            filter_info.append(f"🎯 Цели: {filters.get('filter_goals')}")
-
-    # Создаем клавиатуру с фильтрами
+        filters_text += f"🏙️ Город: {filter_city}\n"
+    
+    # Возраст
+    if filter_age_min is not None and filter_age_max is not None:
+        filters_text += f"🔢 Возраст: {filter_age_min}-{filter_age_max} лет\n"
+    else:
+        filters_text += "🔢 Возраст: Не задан\n"
+    
+    # Интересы (на основе теста)
+    if filter_interests:
+        # Словарь соответствия интересов понятным названиям
+        interest_names = {
+            "active": "Активный отдых",
+            "travel": "Путешествия",
+            "sport": "Спорт",
+            "animals": "Животные",
+            "art": "Творчество",
+            "parties": "Шумные вечеринки",
+            "space": "Интерес к космосу",
+            "serious": "Серьезные отношения"
+        }
+        
+        # Формируем список названий выбранных интересов
+        interest_list = [interest_names.get(interest, interest) for interest in filter_interests]
+        filters_text += f"🧩 Интересы: {', '.join(interest_list)}\n"
+    else:
+        filters_text += "🧩 Интересы: Не заданы\n"
+    
+    # Создаем клавиатуру с кнопками фильтров
     builder = InlineKeyboardBuilder()
-    builder.button(text="📍 Город", callback_data="filter_city")
+    
+    # Кнопки для установки фильтров
+    builder.button(text="🏙️ Город", callback_data="filter_city")
     builder.button(text="🔢 Возраст", callback_data="filter_age")
-
-    # Дополнительные фильтры для подписчиков
-    if has_subscription:
-        builder.button(text="💼 Род занятий", callback_data="filter_occupation")
-        builder.button(text="🎯 Цели знакомства", callback_data="filter_goals")
-
-    # Кнопка сброса фильтров (только если есть хотя бы один фильтр)
-    if has_any_filter:
-        builder.button(text="🔄 Сбросить фильтры", callback_data="reset_filters")
-
-    # Кнопка поиска для всех пользователей
+    builder.button(text="🧩 Интересы", callback_data="filter_interests")
+    
+    # Кнопка сброса фильтров
+    builder.button(text="🔄 Сбросить фильтры", callback_data="reset_filters")
+    
+    # Кнопка начала поиска
     builder.button(text="🔍 Начать поиск", callback_data="start_search")
-    builder.button(text="◀️ Назад", callback_data="back_to_menu")
-
-    # Настраиваем расположение кнопок
-    if has_subscription:
-        builder.adjust(2, 2, 1, 1)  # Основные фильтры по 2 в ряд, доп. кнопки по 1
-    else:
-        builder.adjust(2, 1, 1)  # Основные фильтры по 2 в ряд, доп. кнопки по 1
-
-    # Формируем основной текст сообщения
-    base_text = "⚙️ Выберите фильтры для поиска:" if has_subscription else \
-               "⚙️ Доступные фильтры (для подписки больше фильтров):"
-
-    # Добавляем информацию о текущих фильтрах, если они есть
-    if filter_info:
-        text = f"{base_text}\n\n<b>Текущие фильтры:</b>\n" + "\n".join(filter_info)
-    else:
-        text = base_text
-
-    # Проверяем тип объекта callback_or_message
-    if isinstance(callback_or_message, CallbackQuery):
-        # Это CallbackQuery
-        await callback_or_message.message.edit_text(
-            text,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
+    
+    # Кнопка возврата в меню
+    builder.button(text="◀️ Назад в меню", callback_data="back_to_menu")
+    
+    # Настраиваем расположение кнопок (по 2 в ряд, последние три отдельно)
+    builder.adjust(2, 1, 1, 1)
+    
+    # Проверяем тип источника сообщения (CallbackQuery или Message)
+    if hasattr(source, 'message'):
+        # Если это CallbackQuery
+        await source.message.edit_text(
+            filters_text,
+            reply_markup=builder.as_markup()
         )
     else:
-        # Это Message
-        await callback_or_message.answer(
-            text,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
+        # Если это Message
+        await source.answer(
+            filters_text,
+            reply_markup=builder.as_markup()
         )
 
 @router.callback_query(F.data == "send_feedback")
