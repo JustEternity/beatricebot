@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.exceptions import TelegramForbiddenError  
+from aiogram.exceptions import TelegramForbiddenError
 from bot.handlers.common import show_main_menu
 from bot.models.states import RegistrationStates
 from bot.services.city_validator import city_validator
@@ -14,7 +14,7 @@ from bot.services.utils import delete_previous_messages
 from bot.keyboards.menus import policy_keyboard
 from bot.services.s3storage import S3Service
 from bot.services.image_moderator import EnhancedContentDetector
-from bot.services.text_moderator import TextModerator  
+from bot.services.text_moderator import TextModerator
 from io import BytesIO
 import logging
 import os
@@ -154,6 +154,7 @@ async def location_handler(message: Message, state: FSMContext, crypto: CryptoSe
         logger.warning(f"Пользователь {user_id} заблокировал бота")
         await state.clear()
 
+
 @router.message(RegistrationStates.PHOTOS, F.photo | F.text)
 async def photos_handler(message: Message, state: FSMContext, s3: S3Service, bot: Bot):
     try:
@@ -180,6 +181,14 @@ async def photos_handler(message: Message, state: FSMContext, s3: S3Service, bot
                     os.remove(temp_path)
                 except:
                     pass
+
+                # Проверяем наличие человека
+                if not result.get('contains_person'):
+                    await message.answer(
+                        "⚠️ На фото не обнаружен человек. Пожалуйста, отправьте фото с четко видимым лицом."
+                    )
+                    return
+
                 # Проверяем результат модерации
                 if result.get('verdict') == '🔴 BANNED':
                     violations = []
@@ -197,6 +206,7 @@ async def photos_handler(message: Message, state: FSMContext, s3: S3Service, bot
                         "\nПожалуйста, отправьте другое фото."
                     )
                     return
+
                 # Если фото прошло модерацию, загружаем его в S3
                 file_data.seek(0)
                 s3_url = await s3.upload_photo(file_data, message.from_user.id)
