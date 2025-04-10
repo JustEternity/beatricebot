@@ -1511,6 +1511,7 @@ class Database:
         moderationid: int,
         status: str,  # 'approved' или 'blocked'
         admin_id: int,
+        user: int,
         rejection_reason: str = None
     ):
         """Обновляет статус модерации"""
@@ -1523,6 +1524,12 @@ class Database:
                     moderationdate = CURRENT_TIMESTAMP
                 WHERE moderationid = $4
             """, admin_id, status, rejection_reason, moderationid)
+
+            if user:
+                await conn.execute("""
+                UPDATE users
+                SET moderationstatus = true
+                WHERE telegramid = $1""", user)
 
     async def save_verification_video(self, user_id: int, video_file_id: str):
         """Сохраняет в БД file_id видео для верификации пользователя"""
