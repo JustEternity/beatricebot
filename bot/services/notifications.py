@@ -29,15 +29,31 @@ async def send_like_notification(bot, from_user_id, to_user_id, db, crypto=None)
     """Отправляет уведомление о лайке пользователю"""
     try:
         logger.info(f"Начинаем отправку уведомления о лайке от {from_user_id} к {to_user_id}")
+        
+        # Проверяем, есть ли взаимный лайк
         mutual_like = await db.check_mutual_like(from_user_id, to_user_id)
         
-        # Если есть взаимный лайк, отправляем уведомление о взаимной симпатии
+        # Если есть взаимный лайк, проверяем, были ли оба лайка уже просмотрены
         if mutual_like:
-            logger.info(f"Обнаружена взаимная симпатия между {from_user_id} и {to_user_id}")
-            return await send_match_notification(bot, from_user_id, to_user_id, db, crypto)
-        
-        # Получаем профиль отправителя лайка для персонализации уведомления
-        from_user_profile = await db.get_user_profile(from_user_id)
+            # Получаем статус просмотра обоих лайков
+            async with db.pool.acquire() as conn:
+                both_viewed = await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM likes l1
+                        JOIN likes l2 ON l1.sendertelegramid = l2.receivertelegramid
+                                    AND l1.receivertelegramid = l2.sendertelegramid
+                        WHERE (l1.sendertelegramid = $1 AND l1.receivertelegramid = $2)
+                        AND l1.likeviewedstatus = TRUE AND l2.likeviewedstatus = TRUE
+                    )
+                """, from_user_id, to_user_id)
+            
+            # Если оба лайка не просмотрены, отправляем уведомление о взаимной симпатии
+            if not both_viewed:
+                logger.info(f"Обнаружена взаимная симпатия между {from_user_id} и {to_user_id}")
+                return await send_match_notification(bot, from_user_id, to_user_id, db, crypto)
+            else:
+                logger.info(f"Взаимная симпатия между {from_user_id} и {to_user_id} уже обработана")
+                return True
         
         # Формируем текст уведомления
         notification_text = "❤️ <b>Кто-то проявил к вам симпатию!</b>\n\nХотите посмотреть профиль?"

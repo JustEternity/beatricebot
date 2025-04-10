@@ -131,8 +131,7 @@ async def menu_services(callback: CallbackQuery, db: Database, state: FSMContext
 
 @router.callback_query(F.data.startswith("service_"))
 async def service_details(callback: CallbackQuery, db: Database, state: FSMContext):
-    """Обработчик для просмотра детальной информации об услуге"""
-    logger.debug(f"Получен callback_data: {callback.data}")
+    """Обработчик для просмотра детальной информации об услуге с проверкой активных услуг"""
     try:
         service_id = int(callback.data.split("_")[1])
         user_id = callback.from_user.id
@@ -144,7 +143,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
         service_info = {
             1: {
                 "id": 1,
-                "description": "Подписка на месяц",
+                "description": "💎 Подписка на месяц",
                 "cost": 299,
                 "serviceduration": "30 дней",
                 "priorityboostvalue": 50,
@@ -153,7 +152,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
             },
             2: {
                 "id": 2,
-                "description": "Буст видимости на 24 часа",
+                "description": "🚀 Буст видимости на 24 часа",
                 "cost": 99,
                 "serviceduration": "24 часа",
                 "priorityboostvalue": 100,
@@ -162,7 +161,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
             },
             3: {
                 "id": 3,
-                "description": "Буст видимости на 7 дней",
+                "description": "🔥 Буст видимости на 7 дней",
                 "cost": 499,
                 "serviceduration": "7 дней",
                 "priorityboostvalue": 75,
@@ -178,24 +177,53 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
 
         service = service_info[service_id]
 
-        # Формируем сообщение
+        # Проверяем, есть ли уже активная такая же услуга
+        active_service = await db.pool.fetchrow(
+            """
+            SELECT * FROM purchasedservices
+            WHERE usertelegramid = $1
+            AND serviceid = $2
+            AND serviceenddate > NOW()
+            AND paymentstatus = TRUE
+            """,
+            user_id, service_id
+        )
+
+        # Формируем основное сообщение
         message_text = (
             f"<b>🔍 {service['description']}</b>\n\n"
             f"{service['details']}\n\n"
             f"💰 <b>Стоимость:</b> {service['cost']} руб.\n"
             f"⏱ <b>Длительность:</b> {service['serviceduration']}\n"
-            f"🔝 <b>Повышение приоритета:</b> +{service['priorityboostvalue']}%\n\n"
-            f"Чтобы приобрести услугу, нажмите кнопку ниже."
+            f"🔝 <b>Повышение приоритета:</b> +{service['priorityboostvalue']}%\n"
         )
 
-        # Создаем клавиатуру
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Приобрести", callback_data=f"buy_service_{service_id}")],
-                [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
-                [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
-            ]
-        )
+        # Добавляем информацию об активной услуге, если она есть
+        if active_service:
+            end_date = active_service['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+            message_text += (
+                f"\n\n⚠️ <b>У вас уже активирована эта услуга!</b>\n"
+                f"Действует до: {end_date}"
+            )
+
+        # Создаем клавиатуру в зависимости от статуса услуги
+        if active_service:
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="📋 Мои услуги", callback_data="my_services")],
+                    [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
+                    [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
+                ]
+            )
+        else:
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 Приобрести", callback_data=f"buy_service_{service_id}")],
+                    [InlineKeyboardButton(text="📋 Мои услуги", callback_data="my_services")],
+                    [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
+                    [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
+                ]
+            )
 
         try:
             await callback.message.edit_text(
@@ -216,6 +244,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
         logger.error(f"Error in service_details handler: {e}", exc_info=True)
         await callback.answer("Произошла ошибка при обработке запроса", show_alert=True)
 
+
 @router.callback_query(F.data.startswith("buy_service_"))
 async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
     """Обработчик для покупки услуги"""
@@ -223,13 +252,10 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
         service_id = int(callback.data.split("_")[-1])
         user_id = callback.from_user.id
 
-        # Активируем услугу
+        # Пробуем активировать услугу
         success = await db.activate_service(user_id, service_id)
 
         if success:
-            # Дополнительно исправляем коэффициент для надежности
-            await db.fix_priority_coefficient(user_id)
-
             # Получаем информацию об услуге для сообщения
             service = await db.get_service_by_id(service_id)
             service_name = service['description'] if service else "услуга"
@@ -239,7 +265,7 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
             priority_coefficient = user_data['profileprioritycoefficient'] if user_data else 1.0
             subscription_status = user_data['subscriptionstatus'] if user_data else False
 
-            # Формируем сообщение с информацией о статусе
+            # Формируем сообщение
             status_text = (
                 f"✅ Услуга «{service_name}» успешно активирована!\n\n"
                 f"📊 Ваш текущий приоритет: {priority_coefficient:.2f}\n"
@@ -249,7 +275,6 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
             await callback.answer("✅ Услуга успешно активирована!", show_alert=True)
 
             try:
-                # Показываем сообщение с обновленным статусом
                 await callback.message.edit_text(
                     status_text,
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -267,10 +292,34 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
                     ])
                 )
         else:
-            await callback.answer(
-                "⚠️ Не удалось активировать услугу. Попробуйте позже.",
-                show_alert=True
+            # Получаем информацию об услуге для сообщения об ошибке
+            service = await db.get_service_by_id(service_id)
+            service_name = service['description'] if service else "эта услуга"
+
+            # Проверяем, есть ли уже активная такая же услуга
+            active_services = await db.pool.fetch(
+                """
+                SELECT * FROM purchasedservices
+                WHERE usertelegramid = $1
+                AND serviceid = $2
+                AND serviceenddate > NOW()
+                AND paymentstatus = TRUE
+                """,
+                user_id, service_id
             )
+
+            if active_services:
+                end_date = active_services[0]['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+                message = (
+                    f"⚠️ У вас уже активирована услуга «{service_name}»\n\n"
+                    f"Она действует до: {end_date}\n\n"
+                    f"Вы сможете продлить её после истечения срока."
+                )
+            else:
+                message = "⚠️ Не удалось активировать услугу. Попробуйте позже."
+
+            await callback.answer(message, show_alert=True)
+
     except Exception as e:
         logger.error(f"Error in buy_service handler: {e}", exc_info=True)
         await callback.answer(
