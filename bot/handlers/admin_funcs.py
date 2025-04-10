@@ -323,9 +323,9 @@ async def process_complaint_category(callback: CallbackQuery, state: FSMContext,
 
     await db.update_complaint_status(
         complaint_id=complaint_id,
-        admin_decision=category,
+        category=category,
         status=True,
-        admin_id=callback.message.from_user.id
+        admin_id=callback.from_user.id
     )
 
     # Переходим к следующему обращению

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # Обработчик жалобы на пользователя
-@router.callback_query(F.data.startswith("complaint_user_"))
+@router.callback_query(F.data.startswith("compl_user_"))
 async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:Database):
     try:
         # Извлекаем ID пользователя из callback_data
@@ -22,7 +22,8 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
         current_user_id = callback.from_user.id
         logger.debug(f"Обработка жалобы от {current_user_id} к {user_id}")
         await state.update_data(reported_user=user_id)
-        callback.message.answer(text="Укажите причину жалобы:", reply_markup=complaint_categories())
+        await callback.message.answer(text="Укажите причину жалобы:", reply_markup=complaint_categories())
+        await callback.answer()
 
     except Exception as e:
         logger.error(f"Ошибка при обработке жалобы: {e}", exc_info=True)
@@ -42,7 +43,7 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
         compatible_users = state_data.get("compatible_users", [])
         current_index = state_data.get("current_compatible_index", 0)
         rep_user = state_data.get("reported_user")
-        db.save_complaint(sender=callback.from_user.id, reporteduser=rep_user, reason=callback.data.split("_")[1])
+        await db.save_complaint(sender=callback.from_user.id, reporteduser=rep_user, reason=callback.data.split("_")[1])
         callback.message.answer(text="Спасибо, ваша жалоба принята:")
 
         # ДОБАВЛЕНО: Переходим к следующей анкете, если она есть

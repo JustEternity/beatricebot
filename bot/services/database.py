@@ -1256,7 +1256,7 @@ class Database:
                     """
                     UPDATE complaints
                     SET
-                        category = $1,
+                        admindecision = $1,
                         processingstatus = $2,
                         admintelegramid = $3
                     WHERE complaintid = $4

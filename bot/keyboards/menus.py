@@ -232,7 +232,7 @@ def compatible_navigation_keyboard(
     if user_id:
         main_buttons.append(InlineKeyboardButton(text="❤️ Лайк", callback_data=f"like_user_{user_id}"))
 
-    main_buttons.append(InlineKeyboardButton(text="Пожаловаться", callback_data=f"complaint_user_{user_id}"))
+    main_buttons.append(InlineKeyboardButton(text="Пожаловаться", callback_data=f"compl_user_{user_id}"))
 
     # Кнопка "Пропустить" - всегда показываем, независимо от позиции анкеты
     main_buttons.append(InlineKeyboardButton(text="👎 Пропустить", callback_data="next_compatible"))
