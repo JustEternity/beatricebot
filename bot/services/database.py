@@ -551,11 +551,11 @@ class Database:
                     RETURNING likeid
                 """, user_id, liked_user_id)
                 logger.info(f"Добавлен лайк от {user_id} к {liked_user_id}, ID: {like_id}")
-                
+
                 # Проверяем на взаимный лайк
                 is_mutual = await self.check_mutual_like(user_id, liked_user_id)
                 logger.info(f"Взаимный лайк между {user_id} и {liked_user_id}: {is_mutual}")
-                
+
                 # Если это взаимный лайк, помечаем оба лайка как просмотренные
                 if is_mutual:
                     # Проверяем, были ли оба лайка уже просмотрены
@@ -568,7 +568,7 @@ class Database:
                             AND l1.likeviewedstatus = TRUE AND l2.likeviewedstatus = TRUE
                         )
                     """, user_id, liked_user_id)
-                    
+
                     if not both_viewed:
                         # Помечаем оба лайка как просмотренные
                         await conn.execute("""
@@ -578,12 +578,12 @@ class Database:
                             OR (sendertelegramid = $2 AND receivertelegramid = $1)
                         """, user_id, liked_user_id)
                         logger.info(f"Оба лайка между {user_id} и {liked_user_id} помечены как просмотренные")
-            
+
                 return like_id
         except Exception as e:
             logger.error(f"Ошибка при добавлении лайка: {e}", exc_info=True)
             return 0
-    
+
     async def check_mutual_like(self, user_id: int, liked_user_id: int) -> bool:
         """Проверяет, есть ли взаимный лайк между двумя пользователями"""
         try:
@@ -1027,10 +1027,10 @@ class Database:
                 # Добавляем запись о покупке услуги
                 await conn.execute(
                     """
-                    INSERT INTO purchasedservices 
+                    INSERT INTO purchasedservices
                     (usertelegramid, serviceid, serviceenddate, paymentstatus, paymentid)
-                    VALUES ($1, $2, 
-                        NOW() + (SELECT serviceduration FROM servicetypes WHERE serviceid = $2), 
+                    VALUES ($1, $2,
+                        NOW() + (SELECT serviceduration FROM servicetypes WHERE serviceid = $2),
                         TRUE, $3)
                     """,
                     user_id, service_id, user_id
@@ -1412,3 +1412,15 @@ class Database:
         async with self.pool.acquire() as conn:
             query = "SELECT EXISTS(SELECT 1 FROM users WHERE telegramid = $1 and accountstatus='blocked')"
             return await conn.fetchval(query, user_id)
+
+    async def save_complaint(self, sender: int, reporteduser: int, reason: str):
+        """Сохраняет в БД жалобу на анкету пользователя"""
+        logger.info(f'Сохранение в БД жалобы от {sender} на {reporteduser} за {reason}')
+        try:
+            async with self.pool.acquire() as conn:
+                query = "INSERT INTO complaints (sendertelegramid, reportedusertelegramid, complaintreason) VALUES ($1, $2, $3)"
+                return await conn.execute(query, sender, reporteduser, reason)
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении жалобы на анкету {reporteduser}")
+            logger.exception(e)
+            return None

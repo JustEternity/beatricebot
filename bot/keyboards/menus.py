@@ -89,6 +89,16 @@ def feedback_categories() -> InlineKeyboardMarkup:
         ]
     )
 
+def complaint_categories() -> InlineKeyboardMarkup:
+    """Меню выбора категории жалобы"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Некорретное описание", callback_data="incorrect_description")],
+            [InlineKeyboardButton(text="Некорретное фото", callback_data="incorrect_photo")],
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_menu")]
+        ]
+    )
+
 def complaint_decisions() -> InlineKeyboardMarkup:
     """Решения для жалоб"""
     return InlineKeyboardMarkup(
@@ -221,6 +231,8 @@ def compatible_navigation_keyboard(
     # Кнопка "Лайк" - всегда показываем
     if user_id:
         main_buttons.append(InlineKeyboardButton(text="❤️ Лайк", callback_data=f"like_user_{user_id}"))
+
+    main_buttons.append(InlineKeyboardButton(text="Пожаловаться", callback_data=f"complaint_user_{user_id}"))
 
     # Кнопка "Пропустить" - всегда показываем, независимо от позиции анкеты
     main_buttons.append(InlineKeyboardButton(text="👎 Пропустить", callback_data="next_compatible"))
