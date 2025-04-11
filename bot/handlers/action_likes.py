@@ -44,7 +44,7 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
         current_index = state_data.get("current_compatible_index", 0)
         rep_user = state_data.get("reported_user")
         await db.save_complaint(sender=callback.from_user.id, reporteduser=rep_user, reason=callback.data.split("_")[1])
-        callback.message.answer(text="Спасибо, ваша жалоба принята:")
+        await callback.message.answer(text="Спасибо, ваша жалоба принята")
 
         # ДОБАВЛЕНО: Переходим к следующей анкете, если она есть
         if compatible_users and current_index < len(compatible_users) - 1:

@@ -303,11 +303,12 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
         reply_markup=complaint_decisions()
     )
 
-    await state.update_data(last_message_id=msg.message_id)
+    await state.update_data(last_message_id=msg.message_id, current_user=data[0])
 
 @router.callback_query(F.data.startswith("complaint_"))
 async def process_complaint_category(callback: CallbackQuery, state: FSMContext, db: Database):
     data = await state.get_data()
+    user_id = data.get('current_user')
     complaints_list = data.get('complaints_list', [])
     current_idx = data.get('current_compl_index', 0)
 
@@ -325,8 +326,12 @@ async def process_complaint_category(callback: CallbackQuery, state: FSMContext,
         complaint_id=complaint_id,
         category=category,
         status=True,
-        admin_id=callback.from_user.id
+        admin_id=callback.from_user.id,
+        user=user_id
     )
+
+    if category == 'block':
+        await callback.bot.send_message(chat_id=user_id, text="Ваш аккаунт заблокирован за нарушение правил составления анкеты!")
 
     # Переходим к следующему обращению
     await state.update_data(current_compl_index=current_idx + 1)
@@ -554,7 +559,8 @@ async def moder_block_reason(message: Message, state: FSMContext, db: Database):
         moderationid=data[current_idx][0],
         status='blocked',
         admin_id=message.from_user.id,
-        rejection_reason=reason
+        rejection_reason=reason,
+        user=user_id
     )
 
     # Уведомляем пользователя

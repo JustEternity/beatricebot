@@ -1253,7 +1253,7 @@ class Database:
             logger.exception(e)
             return None
 
-    async def update_complaint_status(self, complaint_id, category, status, admin_id):
+    async def update_complaint_status(self, complaint_id, category, status, admin_id, user=None):
         """Обновляет статус и категорию жалобы"""
         try:
             async with self.pool.acquire() as conn:
@@ -1268,6 +1268,13 @@ class Database:
                     """,
                     category, status, admin_id, complaint_id
                 )
+
+                if user:
+                    await conn.execute("""
+                    UPDATE users
+                    SET accountstatus = 'blocked'
+                    WHERE telegramid = $1""", user)
+
                 logger.info(f"Обновлен статус жалобы ID {complaint_id}")
         except Exception as e:
             logger.error(f"Ошибка обновления статуса жалобы: {e}")
