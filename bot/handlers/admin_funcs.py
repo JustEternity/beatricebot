@@ -327,7 +327,7 @@ async def process_complaint_category(callback: CallbackQuery, state: FSMContext,
         category=category,
         status=True,
         admin_id=callback.from_user.id,
-        user=user_id
+        user=(user_id if category == 'block' else None)
     )
 
     if category == 'block':

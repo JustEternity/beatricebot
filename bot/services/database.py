@@ -1268,7 +1268,7 @@ class Database:
                     """,
                     category, status, admin_id, complaint_id
                 )
-
+                print(f'Отладка для {user}')
                 if user:
                     await conn.execute("""
                     UPDATE users
