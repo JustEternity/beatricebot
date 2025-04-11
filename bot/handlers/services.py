@@ -254,6 +254,8 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
 
         # Пробуем активировать услугу
         success = await db.activate_service(user_id, service_id)
+        if service_id == 1 and success:
+            callback.answer("Ваша анкета отправлена на модерацию", show_alert=True)
 
         if success:
             # Получаем информацию об услуге для сообщения

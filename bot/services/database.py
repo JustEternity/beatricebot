@@ -1043,6 +1043,11 @@ class Database:
                         user_id
                     )
 
+                    await conn.execute(
+                        "INSERT INTO moderations (usertelegramid) VALUES (usertelegramid = $1)",
+                        user_id
+                    )
+
                 # Обновляем коэффициент приоритета
                 await self.update_user_priority(user_id)
 
