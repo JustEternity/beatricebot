@@ -1355,7 +1355,7 @@ class Database:
         moderationid: int,
         status: str,  # 'approved' или 'blocked'
         admin_id: int,
-        user: int,
+        user: int = None,
         rejection_reason: str = None
     ):
         """Обновляет статус модерации"""
