@@ -585,8 +585,7 @@ async def handle_approve(callback: CallbackQuery, state: FSMContext, db: Databas
     await db.update_moderation_status(
         moderationid=data[current_idx][0],
         status='approved',
-        admin_id=callback.from_user.id, user=user_id,
-        user=user_id
+        admin_id=callback.from_user.id, user=user_id
     )
 
     await callback.answer("✅ Анкета одобрена")
