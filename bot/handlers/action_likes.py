@@ -84,38 +84,15 @@ async def like_user_handler(callback: CallbackQuery, state: FSMContext, db: Data
         # ОТЛАДКА: Проверяем таблицу лайков
         await db.debug_likes_table(current_user_id, user_id)
         
-        # Проверяем, существует ли уже лайк от текущего пользователя к другому
-        like_exists = await db.check_like_exists(current_user_id, user_id)
-        
-        # Если лайк не существует, добавляем его
-        if not like_exists:
-            # ВАЖНО: передаем объект бота в метод add_like
-            like_id = await db.add_like(current_user_id, user_id, callback.bot)
-            logger.debug(f"Добавлен новый лайк с ID: {like_id}")
-        else:
-            logger.debug(f"Лайк уже существует")
+        # Добавляем лайк (уведомления отправляются внутри add_like)
+        like_id = await db.add_like(current_user_id, user_id, callback.bot, crypto)
+        logger.debug(f"Результат добавления лайка: {like_id}")
         
         # ОТЛАДКА: Проверяем таблицу лайков после возможного добавления
         await db.debug_likes_table(current_user_id, user_id)
         
-        # Проверяем, есть ли взаимный лайк
-        is_mutual = await db.check_mutual_like(current_user_id, user_id)
-        logger.debug(f"Взаимный лайк: {is_mutual}")
-        
         # Удаляем текущее сообщение
         await delete_message_safely(callback.message)
-        
-        if is_mutual:
-            # ВАЖНО: Сначала отправляем уведомление, потом отмечаем как просмотренные
-            match_sent = await send_match_notification(callback.bot, current_user_id, user_id, db, crypto)
-            
-            if match_sent:
-                # Помечаем оба лайка как просмотренные только после успешной отправки
-                await db.mark_likes_as_viewed(current_user_id, user_id, only_unviewed=False)
-                await db.mark_likes_as_viewed(user_id, current_user_id, only_unviewed=False)
-        else:
-            # Отправляем уведомление о лайке
-            await send_like_notification(callback.bot, current_user_id, user_id, db, crypto)
         
         # ДОБАВЛЕНО: Получаем текущие данные из состояния
         state_data = await state.get_data()
@@ -154,57 +131,29 @@ async def like_back_handler(callback: CallbackQuery, state: FSMContext, db: Data
         # Получаем ID пользователя из callback_data
         user_id = int(callback.data.split(':')[1])
         current_user_id = callback.from_user.id
-
         logger.debug(f"Обработка ответного лайка от {current_user_id} к {user_id}")
-
+        
         # ОТЛАДКА: Проверяем таблицу лайков
         await db.debug_likes_table(current_user_id, user_id)
-
+        
         # Проверяем, существует ли уже лайк
         like_exists = await db.check_like_exists(current_user_id, user_id)
-
-        # Переменная для отслеживания, был ли добавлен новый лайк
-        new_like_added = False
-
-        # Если лайк не существует, добавляем его
-        if not like_exists:
-            # Добавляем лайк в базу данных
-            like_result = await db.add_like(current_user_id, user_id, callback.bot)
-            logger.debug(f"Добавлен новый лайк с ID: {like_result}")
-            new_like_added = True
-        else:
-            logger.debug(f"Лайк уже существует")
-
+        
+        # Добавляем лайк (уведомления отправляются внутри add_like)
+        like_result = await db.add_like(current_user_id, user_id, callback.bot, crypto)
+        logger.debug(f"Результат добавления лайка: {like_result}")
+        
         # ОТЛАДКА: Проверяем таблицу лайков после возможного добавления
         await db.debug_likes_table(current_user_id, user_id)
-
+        
         # Удаляем текущее сообщение
         try:
             await callback.message.delete()
         except Exception as e:
             logger.error(f"Ошибка удаления сообщения: {e}")
-
-        # Проверяем, есть ли взаимные лайки
-        mutual_like = await db.check_mutual_like(current_user_id, user_id)
-        logger.debug(f"Взаимный лайк: {mutual_like}")
-
-        # Отправляем уведомления о взаимной симпатии через функцию из notifications.py
-        if mutual_like:
-            # Помечаем оба лайка как просмотренные
-            await db.mark_likes_as_viewed(current_user_id, user_id, only_unviewed=False)
-            await db.mark_likes_as_viewed(user_id, current_user_id, only_unviewed=False)
-
-            # Отправляем уведомления обоим пользователям только если был добавлен новый лайк
-            if new_like_added:
-                await send_match_notification(callback.bot, current_user_id, user_id, db, crypto)
-        else:
-            # Если нет взаимного лайка, отправляем обычное уведомление о лайке только если был добавлен новый лайк
-            if new_like_added:
-                await send_like_notification(callback.bot, current_user_id, user_id, db, crypto)
-
+        
         # ДОБАВЛЕНО: Получаем следующий лайк для просмотра
         likes = await db.get_user_likes(current_user_id, only_unviewed=True)
-
         if likes:
             # Сохраняем список лайков в состоянии
             await state.update_data(likes_list=likes, current_like_index=0)
@@ -216,7 +165,6 @@ async def like_back_handler(callback: CallbackQuery, state: FSMContext, db: Data
                 "Вы просмотрели все лайки!",
                 reply_markup=back_to_menu_button()
             )
-
     except Exception as e:
         logger.error(f"Ошибка при обработке ответного лайка: {e}", exc_info=True)
         await callback.answer("Произошла ошибка. Пожалуйста, попробуйте еще раз.")
@@ -234,10 +182,20 @@ async def dislike_user_handler(callback: CallbackQuery, state: FSMContext, db: D
     try:
         # Получаем ID пользователя из callback_data
         user_id = int(callback.data.split(':')[1])
+        current_user_id = callback.from_user.id
+        
         # Отмечаем лайк как просмотренный
-        await db.mark_likes_as_viewed(user_id, callback.from_user.id)
+        await db.mark_likes_as_viewed(user_id, current_user_id)
+        
+        # Удаляем лайки между пользователями
+        await db.delete_mutual_likes(user_id, current_user_id)
+        
+        # ОТЛАДКА: Проверяем таблицу лайков после удаления
+        await db.debug_likes_table(current_user_id, user_id)
+        
         # Удаляем текущее сообщение
         await callback.message.delete()
+        
         # Отправляем новое сообщение вместо редактирования
         await callback.message.answer(
             "Вы отклонили этого пользователя.",
@@ -281,73 +239,39 @@ async def mutual_like_handler(callback: CallbackQuery, state: FSMContext, db: Da
         logger.debug("Пользователь выбрал 'Взаимная симпатия'")
         state_data = await state.get_data()
         likes_list = state_data.get("likes_list", [])
-
+        
         # Если список пустой — ничего не делаем
         if not likes_list:
             await callback.answer("Нет доступных лайков")
             return
-
+        
         # Берем первый лайк из списка
         current_like = likes_list.pop(0)
         sender_id = current_like.get("from_user_id") or current_like.get("sendertelegramid")
-
+        
         if not sender_id:
             logger.error(f"Неизвестная структура лайка: {current_like}")
             await callback.answer("Ошибка при обработке лайка")
             return
-
+        
         logger.debug(f"Обработка взаимной симпатии от {callback.from_user.id} к {sender_id}")
-
+        
         # ОТЛАДКА: Проверяем таблицу лайков
         await db.debug_likes_table(callback.from_user.id, sender_id)
-
-        # Проверяем, существует ли уже лайк
-        like_exists = await db.check_like_exists(callback.from_user.id, sender_id)
-
-        # Если лайк не существует, добавляем его
-        if not like_exists:
-            # Добавляем лайк и проверяем взаимность
-            await db.add_like(callback.from_user.id, sender_id, callback.bot)
-            logger.debug(f"Добавлен новый лайк от {callback.from_user.id} к {sender_id}")
-        else:
-            logger.debug(f"Лайк от {callback.from_user.id} к {sender_id} уже существует")
-
+        
+        # Добавляем лайк (уведомления отправляются внутри add_like)
+        like_result = await db.add_like(callback.from_user.id, sender_id, callback.bot, crypto)
+        logger.debug(f"Результат добавления лайка: {like_result}")
+        
         # ОТЛАДКА: Проверяем таблицу лайков после возможного добавления
         await db.debug_likes_table(callback.from_user.id, sender_id)
-
-        # Проверяем, есть ли взаимный лайк
-        is_mutual = await db.check_mutual_like(callback.from_user.id, sender_id)
-        logger.debug(f"Взаимный лайк: {is_mutual}")
-
+        
         # Удаляем текущее сообщение
         await delete_message_safely(callback.message)
-
-        # Если есть взаимный лайк, помечаем оба лайка как просмотренные
-        if is_mutual:
-            await db.mark_likes_as_viewed(callback.from_user.id, sender_id, only_unviewed=False)
-            await db.mark_likes_as_viewed(sender_id, callback.from_user.id, only_unviewed=False)
-
-            # Отправляем уведомление о взаимной симпатии
-            await send_match_notification(callback.bot, callback.from_user.id, sender_id, db, crypto)
-
-            # Отправляем сообщение о взаимной симпатии текущему пользователю
-            await callback.message.answer(
-                f"🎉 У вас взаимная симпатия! Теперь вы можете начать общение.",
-                reply_markup=back_to_menu_button()
-            )
-        else:
-            # Отправляем уведомление о лайке
-            await send_like_notification(callback.bot, callback.from_user.id, sender_id, db, crypto)
-
-            # Сообщаем пользователю, что лайк отправлен
-            await callback.message.answer(
-                "Вы отправили лайк! Если пользователь ответит взаимностью, вы получите уведомление.",
-                reply_markup=back_to_menu_button()
-            )
-
+        
         # Удаляем просмотренную анкету из состояния
         await state.update_data(likes_list=likes_list)
-
+        
         # Показываем следующую анкету или возвращаем в меню
         if likes_list:
             await state.update_data(current_like_index=0)
@@ -355,7 +279,6 @@ async def mutual_like_handler(callback: CallbackQuery, state: FSMContext, db: Da
         else:
             # Получаем количество непросмотренных лайков
             likes_count = await db.get_unviewed_likes_count(callback.from_user.id)
-
             await callback.message.answer(
                 "🔹 Главное меню 🔹",
                 reply_markup=main_menu(likes_count)
