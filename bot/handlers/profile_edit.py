@@ -302,89 +302,94 @@ async def edit_photos_handler(
     callback: CallbackQuery,
     state: FSMContext,
     db: Database,
-    s3: S3Service
-):
+    s3: S3Service):
     user_id = callback.from_user.id
-
     try:
-        # Удаляем все старые фото пользователя
-        delete_success = await s3.delete_user_photos(user_id)
-
-        if not delete_success:
-            await callback.answer("❌ Ошибка при удалении старых фото", show_alert=True)
-            return
-
-        # Очищаем фото в базе данных
-        if not await db.update_user_photos(user_id, []):
-            await callback.answer("❌ Ошибка очистки фото в базе", show_alert=True)
-            return
-
+        # Получаем текущие фото пользователя
+        user_data = await db.get_user_data(user_id)
+        current_photos = user_data.get('photos', [])
+        
+        # Сохраняем текущие фото в состоянии
+        await state.update_data(
+            old_photos=current_photos,
+            temp_photos=[]
+        )
+        
         # Настраиваем интерфейс
         builder = ReplyKeyboardBuilder()
-        builder.add(KeyboardButton(text="📷 Добавить фото"))
         builder.add(KeyboardButton(text="✅ Завершить"))
-
+        builder.add(KeyboardButton(text="❌ Отмена"))
+        
         msg = await callback.message.answer(
             "Отправьте новые фотографии (максимум 3):",
             reply_markup=builder.as_markup(resize_keyboard=True)
         )
-
-        await state.update_data(
-            edit_message_id=msg.message_id,
-            temp_photos=[]
-        )
+        
+        await state.update_data(edit_message_id=msg.message_id)
         await state.set_state(RegistrationStates.EDIT_PHOTOS)
         await callback.answer()
-
     except Exception as e:
         logger.error(f"Edit photos init error: {str(e)}")
         await callback.answer("❌ Критическая ошибка инициализации", show_alert=True)
 
+@router.message(RegistrationStates.EDIT_PHOTOS, F.text == "❌ Отмена")
+async def process_edit_photos_cancel(
+    message: Message,
+    state: FSMContext):
+    
+    await message.answer("✅ Редактирование фотографий отменено.", reply_markup=ReplyKeyboardRemove())
+    await show_edit_menu(message, state)
 
 @router.message(RegistrationStates.EDIT_PHOTOS, F.photo)
 async def process_edit_photos_photo(
         message: Message,
         state: FSMContext,
         bot: Bot,
-        s3: S3Service
-):
+        s3: S3Service):
     data = await state.get_data()
     temp_photos = data.get('temp_photos', [])
-
     if len(temp_photos) >= 3:
         await message.answer("⚠️ Достигнут лимит в 3 фотографии")
         return
-
+    
+    # Отправляем сообщение о проверке фото
+    processing_msg = await message.answer("🔍 Проверяю фотографию... Это может занять некоторое время.")
+    
     try:
         # Скачиваем и обрабатываем фото
         file_id = message.photo[-1].file_id
         file = await bot.get_file(file_id)
-
         file_data = BytesIO()
         await bot.download_file(file.file_path, file_data)
-
+        
         # Сохраняем временный файл для анализа
         temp_path = f"temp_{message.from_user.id}.jpg"
         with open(temp_path, "wb") as f:
             f.write(file_data.getbuffer())
-
+        
         # Анализируем фото
         detector = EnhancedContentDetector()
         result = detector.analyze_image(temp_path)
-
+        
         # Удаляем временный файл
         try:
             os.remove(temp_path)
         except:
             pass
-
+        
+        # Удаляем сообщение о проверке
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
+        except Exception as e:
+            logger.error(f"Error deleting processing message: {str(e)}")
+        
         # Проверяем наличие человека
         if not result.get('contains_person'):
             await message.answer(
                 "⚠️ На фото не обнаружен человек. Пожалуйста, отправьте фото с четко видимым лицом."
             )
             return
-
+        
         # Проверяем результат модерации
         if result.get('verdict') == '🔴 BANNED':
             violations = []
@@ -396,42 +401,44 @@ async def process_edit_photos_photo(
                 violations.append("🔫 оружие/опасные предметы")
             if result['violations'].get('violence'):
                 violations.append("💢 насилие/кровь")
-
             await message.answer(
                 "⚠️ Фото отклонено модерацией. Причины:\n" +
                 "\n".join(violations) +
                 "\nПожалуйста, отправьте другое фото."
             )
             return
-
+        
         # Если фото прошло модерацию, загружаем его в S3
         file_data.seek(0)
         s3_url = await s3.upload_photo(file_data, message.from_user.id)
-
         if not s3_url:
             await message.answer("⚠️ Ошибка загрузки фото. Попробуйте еще раз")
             return
-
+        
         # Сохраняем данные
         temp_photos.append({
             "file_id": file_id,
             "s3_url": s3_url,
             "moderation_result": result
         })
-
         await state.update_data(temp_photos=temp_photos)
-
+        
         # Обновляем клавиатуру
         builder = ReplyKeyboardBuilder()
-        builder.add(KeyboardButton(text="📷 Добавить еще"))
         builder.add(KeyboardButton(text="✅ Завершить"))
-
+        builder.add(KeyboardButton(text="❌ Отмена"))
+        
         await message.answer(
             f"✅ Добавлено фото ({len(temp_photos)}/3)",
             reply_markup=builder.as_markup(resize_keyboard=True)
         )
-
     except Exception as e:
+        # Удаляем сообщение о проверке в случае ошибки
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
+        except Exception as del_err:
+            logger.error(f"Error deleting processing message: {str(del_err)}")
+            
         logger.error(f"Photo edit error: {str(e)}")
         await message.answer("⚠️ Ошибка при обработке фото. Попробуйте еще раз")
 
@@ -440,30 +447,44 @@ async def process_edit_photos_finish(
     message: Message,
     state: FSMContext,
     db: Database,
-    s3: S3Service
-):
+    s3: S3Service):
     user_id = message.from_user.id
     data = await state.get_data()
     temp_photos = data.get('temp_photos', [])
-
+    old_photos = data.get('old_photos', [])
+    
     if not temp_photos:
-        await message.answer("⚠️ Вы не добавили ни одной фотографии")
+        await message.answer("⚠️ Вы не добавили ни одной фотографии. Редактирование отменено.", 
+                            reply_markup=ReplyKeyboardRemove())
+        # Восстанавливаем старые фото (они не были удалены)
+        await show_edit_menu(message, state)
         return
-
+    
     try:
+        # Удаляем старые фото только после успешного добавления новых
+        delete_success = await s3.delete_user_photos(user_id)
+        if not delete_success:
+            await message.answer("❌ Ошибка при удалении старых фото", 
+                               reply_markup=ReplyKeyboardRemove())
+            await show_edit_menu(message, state)
+            return
+            
         # Фиксируем новые фото в базе
         if await db.update_user_photos(user_id, temp_photos):
-            await message.answer("✅ Фотографии успешно обновлены!", reply_markup=ReplyKeyboardRemove())
+            await message.answer("✅ Фотографии успешно обновлены!", 
+                               reply_markup=ReplyKeyboardRemove())
         else:
-            # Если ошибка базы - удаляем загруженные фото
-            await s3.delete_user_photos(user_id)
-            await message.answer("❌ Ошибка при обновлении фотографий", reply_markup=ReplyKeyboardRemove())
-
+            # Если ошибка базы - восстанавливаем старые фото
+            await db.update_user_photos(user_id, old_photos)
+            await message.answer("❌ Ошибка при обновлении фотографий", 
+                               reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         logger.error(f"Final photo update error: {str(e)}")
-        await s3.delete_user_photos(user_id)
-        await message.answer("❌ Критическая ошибка при сохранении", reply_markup=ReplyKeyboardRemove())
-
+        # Восстанавливаем старые фото
+        await db.update_user_photos(user_id, old_photos)
+        await message.answer("❌ Критическая ошибка при сохранении", 
+                           reply_markup=ReplyKeyboardRemove())
+    
     await show_edit_menu(message, state)
 
 # Пройти тест - главное меню

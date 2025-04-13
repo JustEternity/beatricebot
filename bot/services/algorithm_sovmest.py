@@ -315,55 +315,56 @@ class CompatibilityService:
             logger.exception(e)
             return [], []
 
-    async def get_compatibility_explanation(self, user1_id: int, user2_id: int) -> str:
-        """
-        Генерирует объяснение совместимости между пользователями
+# неактивная функция, идея для доработки бота в будущем
+    # async def get_compatibility_explanation(self, user1_id: int, user2_id: int) -> str: 
+    #     """
+    #     Генерирует объяснение совместимости между пользователями
         
-        Args:
-            user1_id: ID первого пользователя
-            user2_id: ID второго пользователя
+    #     Args:
+    #         user1_id: ID первого пользователя
+    #         user2_id: ID второго пользователя
             
-        Returns:
-            str: Текстовое объяснение совместимости
-        """
-        # Получаем ответы обоих пользователей
-        user1_answers = await self.db.get_user_answers(user1_id)
-        user2_answers = await self.db.get_user_answers(user2_id)
+    #     Returns:
+    #         str: Текстовое объяснение совместимости
+    #     """
+    #     # Получаем ответы обоих пользователей
+    #     user1_answers = await self.db.get_user_answers(user1_id)
+    #     user2_answers = await self.db.get_user_answers(user2_id)
         
-        if not user1_answers or not user2_answers:
-            return "Недостаточно данных для анализа совместимости."
+    #     if not user1_answers or not user2_answers:
+    #         return "Недостаточно данных для анализа совместимости."
         
-        # Получаем вопросы
-        questions = await self.db.get_all_questions()
+    #     # Получаем вопросы
+    #     questions = await self.db.get_all_questions()
         
-        # Находим совпадения и различия
-        matches = []
-        differences = []
+    #     # Находим совпадения и различия
+    #     matches = []
+    #     differences = []
         
-        for q_id, question in questions.items():
-            if q_id in user1_answers and q_id in user2_answers:
-                if user1_answers[q_id] == user2_answers[q_id]:
-                    matches.append(question['text'])
-                else:
-                    differences.append(question['text'])
+    #     for q_id, question in questions.items():
+    #         if q_id in user1_answers and q_id in user2_answers:
+    #             if user1_answers[q_id] == user2_answers[q_id]:
+    #                 matches.append(question['text'])
+    #             else:
+    #                 differences.append(question['text'])
         
-        # Формируем объяснение
-        explanation = "Анализ совместимости:\n\n"
+    #     # Формируем объяснение
+    #     explanation = "Анализ совместимости:\n\n"
         
-        if matches:
-            explanation += "🟢 Совпадения во взглядах:\n"
-            for i, match in enumerate(matches[:3], 1):  # Показываем только первые 3 совпадения
-                explanation += f"{i}. {match}\n"
+    #     if matches:
+    #         explanation += "🟢 Совпадения во взглядах:\n"
+    #         for i, match in enumerate(matches[:3], 1):  # Показываем только первые 3 совпадения
+    #             explanation += f"{i}. {match}\n"
             
-            if len(matches) > 3:
-                explanation += f"...и еще {len(matches) - 3} совпадений\n"
+    #         if len(matches) > 3:
+    #             explanation += f"...и еще {len(matches) - 3} совпадений\n"
         
-        if differences:
-            explanation += "\n🔴 Различия во взглядах:\n"
-            for i, diff in enumerate(differences[:3], 1):  # Показываем только первые 3 различия
-                explanation += f"{i}. {diff}\n"
+    #     if differences:
+    #         explanation += "\n🔴 Различия во взглядах:\n"
+    #         for i, diff in enumerate(differences[:3], 1):  # Показываем только первые 3 различия
+    #             explanation += f"{i}. {diff}\n"
             
-            if len(differences) > 3:
-                explanation += f"...и еще {len(differences) - 3} различий\n"
+    #         if len(differences) > 3:
+    #             explanation += f"...и еще {len(differences) - 3} различий\n"
         
-        return explanation
+    #     return explanation
