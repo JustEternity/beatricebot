@@ -423,15 +423,13 @@ async def unexpected_messages_handler(message: Message, state: FSMContext, db: D
             "или нажмите /cancel для отмены."
         )
 
-
 async def get_user_profile(
     user_id: int,
     db: Database,
     crypto: CryptoService,
     bot: Bot,
     s3: S3Service,
-    refresh_photos: bool = False
-) -> dict:
+    refresh_photos: bool = False) -> dict:
     """
     Получает и подготавливает данные профиля пользователя
     :param user_id: ID целевого пользователя
@@ -443,44 +441,61 @@ async def get_user_profile(
         'photos': [],
         'user_id': user_id
     }
-
+    
     try:
         # Получаем сырые данные из БД
         user_data = await db.get_user_data(user_id)
         if not user_data:
             return None
-
+        
+        # Добавим отладочную информацию
+        logger.debug(f"User data: {user_data}")
+        
         # Проверка и обновление фото
         if refresh_photos or not user_data.get('photos'):
-            s3_urls = [photo['s3_url'] for photo in user_data.get('photos', [])]
-
-            # Логика обновления фото
-            new_photos = []
-            if s3_urls:
-                local_paths = await s3.download_photos_by_urls(s3_urls)
-                for path in local_paths:
-                    try:
-                        with open(path, 'rb') as f:
-                            msg = await bot.send_photo(user_id, f)
-                            new_photos.append({
-                                'file_id': msg.photo[-1].file_id,
-                                's3_url': next(url for url in s3_urls if url.split('/')[-1] in path)
-                            })
-                        os.remove(path)
-                    except Exception as e:
-                        logger.error(f"Photo reload error: {str(e)}")
-
-                if new_photos:
-                    await db.update_user_photos(user_id, new_photos)
-                    user_data['photos'] = new_photos
-
-        # Декодирование данных
-        decrypted_fields = {
-            'name': crypto.decrypt(user_data['name']),
-            'location': crypto.decrypt(user_data['location']),
-            'description': crypto.decrypt(user_data['description'])
-        }
-
+            # Проверяем, что photos - это список словарей с ключом 's3_url'
+            photos = user_data.get('photos', [])
+            if isinstance(photos, list) and all(isinstance(p, dict) and 's3_url' in p for p in photos):
+                s3_urls = [photo['s3_url'] for photo in photos]
+                # Логика обновления фото
+                new_photos = []
+                if s3_urls:
+                    local_paths = await s3.download_photos_by_urls(s3_urls)
+                    for path in local_paths:
+                        try:
+                            with open(path, 'rb') as f:
+                                msg = await bot.send_photo(user_id, f)
+                                new_photos.append({
+                                    'file_id': msg.photo[-1].file_id,
+                                    's3_url': next(url for url in s3_urls if url.split('/')[-1] in path)
+                                })
+                            os.remove(path)
+                        except Exception as e:
+                            logger.error(f"Photo reload error: {str(e)}")
+                    if new_photos:
+                        await db.update_user_photos(user_id, new_photos)
+                        user_data['photos'] = new_photos
+            else:
+                logger.warning(f"Invalid photos format: {photos}")
+        
+        # Декодирование данных с проверкой на None
+        try:
+            # Проверяем, что crypto - это экземпляр класса
+            if not isinstance(crypto, CryptoService):
+                logger.error(f"crypto is not an instance of CryptoService: {type(crypto)}")
+                raise TypeError("crypto должен быть экземпляром CryptoService")
+            
+            decrypted_fields = {
+                'name': crypto.decrypt(user_data['name']) if user_data.get('name') else "Не указано",
+                'location': crypto.decrypt(user_data['location']) if user_data.get('location') else "Не указано",
+                'description': crypto.decrypt(user_data['description']) if user_data.get('description') else "Не указано"
+            }
+        except Exception as e:
+            logger.error(f"Decryption failed. Data: {user_data}", exc_info=True)
+            logger.error(f"Error details: {e}", exc_info=True)
+            logger.error(f"Type of crypto: {type(crypto)}")
+            raise
+        
         # Преобразование пола
         gender_map = {
             '0': "👨 Мужской",
@@ -488,28 +503,52 @@ async def get_user_profile(
             0: "👨 Мужской",
             1: "👩 Женский"
         }
-        gender = gender_map.get(user_data['gender'], "Не указан")
-
+        gender = gender_map.get(user_data.get('gender', 'Не указан'), "Не указан")
+        
         # Формирование текста
         profile_text = (
             f"👤 *Профиль пользователя:*\n\n"
             f"▪️ ID: `{user_id}`\n"
             f"▪️ Имя: {decrypted_fields['name']}\n"
-            f"▪️ Возраст: {user_data['age']}\n"
+            f"▪️ Возраст: {user_data.get('age', 'Не указан')}\n"
             f"▪️ Пол: {gender}\n"
             f"▪️ Город: {decrypted_fields['location']}\n"
             f"▪️ Описание: {decrypted_fields['description']}"
         )
-
+        
         # Сборка результата
+        photos_list = []
+        photos = user_data.get('photos', [])
+
+        # Добавим отладочную информацию
+        logger.debug(f"Photos data: {photos}")
+
+        # Проверяем формат photos
+        if isinstance(photos, list):
+            if len(photos) > 0:
+                if all(isinstance(p, dict) and 'file_id' in p for p in photos):
+                    # Если photos - список словарей с ключом 'file_id'
+                    photos_list = [photo['file_id'] for photo in photos]
+                    logger.debug(f"Extracted file_ids from dict: {photos_list}")
+                elif all(isinstance(p, str) for p in photos):
+                    # Если photos - просто список строк (file_id)
+                    photos_list = photos
+                    logger.debug(f"Using photos as is: {photos_list}")
+                else:
+                    logger.warning(f"Unexpected photos format: {photos}")
+            else:
+                logger.debug("Photos list is empty")
+        else:
+            logger.warning(f"Photos is not a list: {photos}")
+
         profile_data.update({
             'text': profile_text,
-            'photos': [photo['file_id'] for photo in user_data.get('photos', [])]
+            'photos': photos_list
         })
-
     except Exception as e:
         logger.error(f"Profile build error: {str(e)}")
+        # Добавляем отладочную информацию
+        print(f"Отладка для {user_data}")
         return None
-
+    
     return profile_data
-

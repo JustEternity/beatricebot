@@ -239,23 +239,25 @@ async def process_feedback_category(callback: CallbackQuery, state: FSMContext, 
     await callback.answer()
 
 @router.callback_query(F.data == "admin_complaints")
-async def admin_complaints_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+async def admin_complaints_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto, bot, s3):
+    # Обратите внимание, что мы добавили параметры crypto, bot и s3
     await delete_previous_messages(callback.message, state)
     await state.clear()
     await state.set_state(RegistrationStates.WATCH_COMPLAINTS)
     complaints = await db.get_complaints()
     if complaints == None or complaints == {}:
         error_msg = await callback.message.answer("📭 Необработанных жалоб нет :)",
-                                                  reply_markup=back_to_admin_menu_button())
+                                              reply_markup=back_to_admin_menu_button())
         await state.update_data(request_message_id=error_msg.message_id)
         return
-
     complaints_list = list(complaints.items())
     await state.update_data(
         complaints_list=complaints_list,
-        current_compl_index=0
+        current_compl_index=0,
+        crypto=crypto,  # Сохраняем экземпляр crypto в state
+        bot=bot,        # Сохраняем экземпляр bot в state
+        s3=s3           # Сохраняем экземпляр s3 в state
     )
-
     await show_next_complaint(callback.message, state, db)
     await callback.answer()
 
@@ -263,7 +265,7 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
     data = await state.get_data()
     complaints_list = data.get('complaints_list', [])
     current_idx = data.get('current_compl_index', 0)
-
+    
     if current_idx >= len(complaints_list):
         await message.answer(
             "✅ Все жалобы обработаны",
@@ -271,39 +273,86 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
         )
         await state.clear()
         return
-
-    complaintid, data = complaints_list[current_idx]
-
+    
+    complaintid, complaint_data = complaints_list[current_idx]
+    
+    # Используем экземпляры из state
     profile = await get_user_profile(
-        user_id=data[0],
+        user_id=complaint_data[0],
         db=db,
-        crypto=CryptoService,
-        bot=Bot,
-        s3=S3Service
+        crypto=data.get('crypto'),
+        bot=message.bot,
+        s3=data.get('s3'),
+        refresh_photos=False
     )
-
+    
     # Формируем сообщение
     message_text = (
         f"🛑 Жалоба #_{complaintid}_\n"
-        f"▪️ На пользователя: {data[0]}\n"
-        f"▪️ Причина: {data[1]}\n\n"
+        f"▪️ На пользователя: {complaint_data[0]}\n"
+        f"▪️ Причина: {complaint_data[1]}\n\n"
     )
-
+    
     if profile:
         message_text += (
-            "📌 *Анкета пользователя:*\n"
             f"{profile['text']}\n\n"
         )
+        
+        # Отправляем фотографии, если они есть
+        photos = profile.get('photos', [])
+        
+        if photos:
+            # Отправляем первую фотографию с текстом жалобы
+            try:
+                msg = await message.bot.send_photo(
+                    chat_id=message.chat.id,
+                    photo=photos[0],
+                    caption=message_text,
+                    reply_markup=complaint_decisions(),
+                    parse_mode="Markdown"  # Важно для форматирования текста
+                )
+                
+                # Если есть дополнительные фотографии, отправляем их отдельно
+                if len(photos) > 1:
+                    media_group = []
+                    for photo_id in photos[1:10]:  # Ограничиваем до 9 дополнительных фото
+                        media_group.append(InputMediaPhoto(media=photo_id))
+                    
+                    if media_group:
+                        try:
+                            await message.bot.send_media_group(
+                                chat_id=message.chat.id,
+                                media=media_group
+                            )
+                        except Exception as e:
+                            logger.error(f"Error sending additional photos: {e}")
+                
+                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
+            except Exception as e:
+                logger.error(f"Error sending photo with caption: {e}")
+                # Если не удалось отправить фото с подписью, отправляем текст отдельно
+                msg = await message.answer(
+                    text=message_text,
+                    reply_markup=complaint_decisions(),
+                    parse_mode="Markdown"
+                )
+                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
+        else:
+            # Если фотографий нет
+            msg = await message.answer(
+                text=message_text + "⚠️ Фотографии отсутствуют",
+                reply_markup=complaint_decisions(),
+                parse_mode="Markdown"
+            )
+            await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
     else:
-        message_text += "⚠️ Анкета пользователя не найдена"
-
-    # Отправляем сообщение с клавиатурой
-    msg = await message.answer(
-        text=message_text,
-        reply_markup=complaint_decisions()
-    )
-
-    await state.update_data(last_message_id=msg.message_id, current_user=data[0])
+        # Если профиль не найден
+        msg = await message.answer(
+            text=message_text + "⚠️ Анкета пользователя не найдена",
+            reply_markup=complaint_decisions(),
+            parse_mode="Markdown"
+        )
+        await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
 
 @router.callback_query(F.data.startswith("complaint_"))
 async def process_complaint_category(callback: CallbackQuery, state: FSMContext, db: Database):

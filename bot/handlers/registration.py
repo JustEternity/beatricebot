@@ -86,7 +86,6 @@ async def policy_handler(message: Message, state: FSMContext):
 @router.message(RegistrationStates.NAME)
 async def name_handler(message: Message, state: FSMContext, crypto: CryptoService):
     try:
-        # Используем text_moderator вместо локальной функции validate_text
         is_valid, error_msg = text_moderator.validate_text(message.text)
         if not is_valid:
             await message.answer(error_msg)
