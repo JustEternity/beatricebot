@@ -140,8 +140,8 @@ def main_menu(likes_count=0) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📝 Пройти тест", callback_data="take_test")],
             [InlineKeyboardButton(text="🔍 Найти совместимых", callback_data="find_compatible")],
             [InlineKeyboardButton(text="🛒 Услуги", callback_data="view_services")],
-            [InlineKeyboardButton(text="Пройти верификацию", callback_data="start_verification")],
-            [InlineKeyboardButton(text="Обратная связь", callback_data="send_feedback")]
+            [InlineKeyboardButton(text="✅ Пройти верификацию", callback_data="start_verification")],
+            [InlineKeyboardButton(text="💬 Обратная связь", callback_data="send_feedback")]
         ]
     )
 
@@ -226,16 +226,16 @@ def compatible_navigation_keyboard(
 
     # Кнопка "Назад" (показываем всегда, кроме первой анкеты)
     if not is_first:
-        main_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="prev_compatible"))
+        main_buttons.append(InlineKeyboardButton(text="⬅️", callback_data="prev_compatible"))
 
     # Кнопка "Лайк" - всегда показываем
     if user_id:
-        main_buttons.append(InlineKeyboardButton(text="❤️ Лайк", callback_data=f"like_user_{user_id}"))
+        main_buttons.append(InlineKeyboardButton(text="❤️", callback_data=f"like_user_{user_id}"))
 
-    main_buttons.append(InlineKeyboardButton(text="Пожаловаться", callback_data=f"compl_user_{user_id}"))
+    main_buttons.append(InlineKeyboardButton(text="⚠️", callback_data=f"compl_user_{user_id}"))
 
     # Кнопка "Пропустить" - всегда показываем, независимо от позиции анкеты
-    main_buttons.append(InlineKeyboardButton(text="👎 Пропустить", callback_data="next_compatible"))
+    main_buttons.append(InlineKeyboardButton(text="👎", callback_data="next_compatible"))
 
     if main_buttons:
         buttons.append(main_buttons)
@@ -246,10 +246,11 @@ def compatible_navigation_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def create_like_keyboard(liker_id):
-    """Создает стандартную клавиатуру для просмотра лайков"""
+    """Создает стандартную клавиатуру для просмотра лайков с кнопкой жалобы"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="❤️ Нравится", callback_data=f"like_back:{liker_id}"),
+            InlineKeyboardButton(text="⚠️ Пожаловаться", callback_data=f"compl_user_{liker_id}"),  # Кнопка жалобы
             InlineKeyboardButton(text="👎 Не нравится", callback_data=f"dislike_user:{liker_id}")
         ],
         [InlineKeyboardButton(text="◀️ Назад в главное меню", callback_data="back_to_menu")]

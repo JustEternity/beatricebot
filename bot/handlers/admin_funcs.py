@@ -302,37 +302,41 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
         photos = profile.get('photos', [])
         
         if photos:
-            # Отправляем первую фотографию с текстом жалобы
             try:
-                msg = await message.bot.send_photo(
-                    chat_id=message.chat.id,
-                    photo=photos[0],
+                # Создаем медиагруппу со всеми фотографиями
+                media_group = []
+                
+                # Первое фото с подписью
+                media_group.append(InputMediaPhoto(
+                    media=photos[0],
                     caption=message_text,
-                    reply_markup=complaint_decisions(),
-                    parse_mode="Markdown"  # Важно для форматирования текста
+                    parse_mode="Markdown"
+                ))
+                
+                # Добавляем остальные фото (если есть)
+                for photo_id in photos[1:10]:  # Ограничиваем до 9 дополнительных фото
+                    media_group.append(InputMediaPhoto(media=photo_id))
+                
+                # Отправляем всю медиагруппу
+                sent_messages = await message.bot.send_media_group(
+                    chat_id=message.chat.id,
+                    media=media_group
                 )
                 
-                # Если есть дополнительные фотографии, отправляем их отдельно
-                if len(photos) > 1:
-                    media_group = []
-                    for photo_id in photos[1:10]:  # Ограничиваем до 9 дополнительных фото
-                        media_group.append(InputMediaPhoto(media=photo_id))
-                    
-                    if media_group:
-                        try:
-                            await message.bot.send_media_group(
-                                chat_id=message.chat.id,
-                                media=media_group
-                            )
-                        except Exception as e:
-                            logger.error(f"Error sending additional photos: {e}")
-                
-                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
-            except Exception as e:
-                logger.error(f"Error sending photo with caption: {e}")
-                # Если не удалось отправить фото с подписью, отправляем текст отдельно
+                # Отправляем кнопки отдельным сообщением, так как медиагруппа не поддерживает reply_markup
                 msg = await message.answer(
-                    text=message_text,
+                    "Выберите действие:",
+                    reply_markup=complaint_decisions()
+                )
+                
+                # Сохраняем ID сообщения с кнопками
+                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
+                
+            except Exception as e:
+                logger.error(f"Error sending media group: {e}")
+                # Если не удалось отправить медиагруппу, отправляем текст отдельно
+                msg = await message.answer(
+                    text=message_text + "⚠️ Ошибка при отправке фотографий",
                     reply_markup=complaint_decisions(),
                     parse_mode="Markdown"
                 )
