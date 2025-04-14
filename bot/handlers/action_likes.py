@@ -177,8 +177,9 @@ async def like_back_handler(callback: CallbackQuery, state: FSMContext, db: Data
             pass
 
 # Обработчик дизлайка пользователя
+# Обработчик дизлайка пользователя
 @router.callback_query(F.data.startswith("dislike_user:"))
-async def dislike_user_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+async def dislike_user_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
     try:
         # Получаем ID пользователя из callback_data
         user_id = int(callback.data.split(':')[1])
@@ -196,20 +197,27 @@ async def dislike_user_handler(callback: CallbackQuery, state: FSMContext, db: D
         # Удаляем текущее сообщение
         await callback.message.delete()
         
-        # Отправляем новое сообщение вместо редактирования
-        await callback.message.answer(
-            "Вы отклонили этого пользователя.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="Вернуться к просмотру лайков",
-                    callback_data="view_likes"
-                )],
-                [InlineKeyboardButton(
-                    text="◀️ Назад в главное меню",
-                    callback_data="back_to_menu"
-                )]
-            ])
-        )
+        # Получаем оставшиеся непросмотренные лайки напрямую из базы данных
+        likes = await db.get_user_likes(current_user_id, only_unviewed=True)
+        
+        # Обновляем состояние с новым списком лайков
+        await state.update_data(likes_list=likes, current_like_index=0)
+        
+        # Проверяем, есть ли еще непросмотренные лайки
+        if likes:
+            # Если есть, показываем следующий профиль
+            await show_like_profile(callback.message, current_user_id, state, db, crypto)
+        else:
+            # Если больше нет непросмотренных лайков, сообщаем об этом
+            await callback.message.answer(
+                "У вас больше нет непросмотренных лайков.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="◀️ Назад в главное меню",
+                        callback_data="back_to_menu"
+                    )]
+                ])
+            )
     except Exception as e:
         logger.error(f"Ошибка при обработке дизлайка: {e}", exc_info=True)
         await callback.answer("Произошла ошибка. Пожалуйста, попробуйте еще раз.")

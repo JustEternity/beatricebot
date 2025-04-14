@@ -51,17 +51,34 @@ async def send_like_notification(bot, from_user_id, to_user_id, db, crypto=None)
             logger.info(f"Обнаружена взаимная симпатия между {from_user_id} и {to_user_id}")
             return await send_match_notification(bot, from_user_id, to_user_id, db, crypto)
         
+        # Получаем количество непросмотренных лайков
+        unviewed_likes_count = await db.get_unviewed_likes_count(to_user_id)
+        logger.info(f"Количество непросмотренных лайков для {to_user_id}: {unviewed_likes_count}")
+        
         # Получаем информацию о пользователе, который поставил лайк
-        sender = await db.get_user_profile(from_user_id)  
+        sender = await db.get_user_profile(from_user_id)
+        
         if not sender:
             logger.error(f"Не удалось найти пользователя с ID {from_user_id}")
             return False
         
         logger.debug(f"Информация о отправителе лайка: {sender}")
         
-        # Формируем текст уведомления
-        notification_text = "❤️ <b>Кто-то проявил к вам симпатию!</b>\n\nХотите посмотреть профиль?"
+        # Формируем текст уведомления в зависимости от количества лайков
+        if unviewed_likes_count <= 1:
+            notification_text = "❤️ <b>Кто-то проявил к вам симпатию!</b>\n\nХотите посмотреть профиль?"
+        else:
+            # Формируем текст с учетом склонения слова "человек"
+            if unviewed_likes_count % 10 == 1 and unviewed_likes_count % 100 != 11:
+                people_text = "человек"
+            elif 2 <= unviewed_likes_count % 10 <= 4 and (unviewed_likes_count % 100 < 10 or unviewed_likes_count % 100 >= 20):
+                people_text = "человека"
+            else:
+                people_text = "человек"
+                
+            notification_text = f"❤️ <b>Вами заинтересовались {unviewed_likes_count} {people_text}!</b>\n\nХотите посмотреть, кто именно?"
         
+        # Используем существующую клавиатуру
         keyboard = get_like_notification_keyboard(from_user_id)
         
         # Отправляем уведомление
