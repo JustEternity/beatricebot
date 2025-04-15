@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Union, Tuple
 from bot.models.user import UserDB
 from bot.services.utils import standardize_gender
+from bot.services.notifications import send_match_notification
 
 logger = logging.getLogger(__name__)
 
@@ -535,70 +536,66 @@ class Database:
             logger.error(f"Ошибка при получении фотографий пользователя {user_id}: {e}")
             return []
 
-    async def add_like(self, user_id: int, liked_user_id: int, bot=None) -> int:
-        """Добавляет лайк от пользователя к другому пользователю"""
+    async def add_like(self, from_user_id, to_user_id, bot=None, crypto=None):
+        """Добавляет лайк в базу данных и проверяет взаимность"""
         try:
-            # Проверяем, существует ли уже такой лайк
-            like_exists = await self.check_like_exists(user_id, liked_user_id)
+            logger.info(f"Начало обработки лайка от {from_user_id} к {to_user_id}")
+            
+            # Проверяем, существует ли уже лайк
+            like_exists = await self.check_like_exists(from_user_id, to_user_id)
+            logger.info(f"Лайк уже существует: {like_exists}")
+            
             if like_exists:
-                logger.info(f"Лайк от {user_id} к {liked_user_id} уже существует")
-                return 0
-            async with self.pool.acquire() as conn:
-                # Добавляем запись о лайке в базу данных
-                like_id = await conn.fetchval("""
-                    INSERT INTO likes (sendertelegramid, receivertelegramid, likeviewedstatus)
-                    VALUES ($1, $2, FALSE)
-                    RETURNING likeid
-                """, user_id, liked_user_id)
-                logger.info(f"Добавлен лайк от {user_id} к {liked_user_id}, ID: {like_id}")
-
-                # Проверяем на взаимный лайк
-                is_mutual = await self.check_mutual_like(user_id, liked_user_id)
-                logger.info(f"Взаимный лайк между {user_id} и {liked_user_id}: {is_mutual}")
-
-                # Если это взаимный лайк, помечаем оба лайка как просмотренные
-                if is_mutual:
-                    # Проверяем, были ли оба лайка уже просмотрены
-                    both_viewed = await conn.fetchval("""
-                        SELECT EXISTS(
-                            SELECT 1 FROM likes l1
-                            JOIN likes l2 ON l1.sendertelegramid = l2.receivertelegramid
-                                        AND l1.receivertelegramid = l2.sendertelegramid
-                            WHERE (l1.sendertelegramid = $1 AND l1.receivertelegramid = $2)
-                            AND l1.likeviewedstatus = TRUE AND l2.likeviewedstatus = TRUE
-                        )
-                    """, user_id, liked_user_id)
-
-                    if not both_viewed:
-                        # Помечаем оба лайка как просмотренные
-                        await conn.execute("""
-                            UPDATE likes
-                            SET likeviewedstatus = TRUE
-                            WHERE (sendertelegramid = $1 AND receivertelegramid = $2)
-                            OR (sendertelegramid = $2 AND receivertelegramid = $1)
-                        """, user_id, liked_user_id)
-                        logger.info(f"Оба лайка между {user_id} и {liked_user_id} помечены как просмотренные")
-
+                return like_exists
+            
+            # Проверяем, есть ли обратный лайк
+            reverse_like_exists = await self.check_like_exists(to_user_id, from_user_id)
+            logger.info(f"Обратный лайк существует: {reverse_like_exists}")
+            
+            # Добавляем лайк
+            query = """
+            INSERT INTO likes (sendertelegramid, receivertelegramid, likeviewedstatus)
+            VALUES ($1, $2, FALSE)
+            RETURNING likeid
+            """
+            like_id = await self.pool.fetchval(query, from_user_id, to_user_id)
+            logger.info(f"Добавлен лайк ID: {like_id}")
+            
+            # Проверяем взаимность
+            mutual_like = reverse_like_exists is not None
+            logger.info(f"Взаимный лайк: {mutual_like}")
+            
+            if bot is None:
+                logger.error("Bot object is None! Cannot send notifications")
                 return like_id
+            
+            # Проверяем, передан ли объект crypto
+            if crypto is None:
+                logger.warning("Crypto object is None! Names will not be decrypted properly")
+            
+            if mutual_like:
+                logger.info("Отправка уведомления о матче")
+                from bot.services.notifications import send_match_notification
+                # Передаем crypto в функцию send_match_notification
+                await send_match_notification(bot, from_user_id, to_user_id, self, crypto)
+                await self.delete_mutual_likes(from_user_id, to_user_id)
+            else:
+                logger.info("Отправка уведомления о лайке")
+                from bot.services.notifications import send_like_notification
+                # Передаем crypto в функцию send_like_notification
+                await send_like_notification(bot, from_user_id, to_user_id, self, crypto)
+            
+            return like_id
         except Exception as e:
-            logger.error(f"Ошибка при добавлении лайка: {e}", exc_info=True)
-            return 0
+            logger.error(f"Ошибка в add_like: {e}", exc_info=True)
+            return None
 
     async def check_mutual_like(self, user_id: int, liked_user_id: int) -> bool:
         """Проверяет, есть ли взаимный лайк между двумя пользователями"""
         try:
-            logger.debug(f"Проверка взаимных лайков между {user_id} и {liked_user_id}")
-            async with self.pool.acquire() as conn:
-                # Проверяем наличие взаимных лайков, независимо от статуса просмотра
-                result = await conn.fetchval("""
-                    SELECT EXISTS(
-                        SELECT 1 FROM likes l1
-                        JOIN likes l2 ON l1.sendertelegramid = l2.receivertelegramid
-                                    AND l1.receivertelegramid = l2.sendertelegramid
-                        WHERE (l1.sendertelegramid = $1 AND l1.receivertelegramid = $2)
-                    )
-                """, user_id, liked_user_id)
-                return bool(result)
+            # Проверяем есть ли лайк в обратном направлении
+            reverse_like = await self.check_like_exists(liked_user_id, user_id)
+            return reverse_like is not None
         except Exception as e:
             logger.error(f"Ошибка при проверке взаимного лайка: {e}")
             return False
@@ -621,6 +618,23 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при получении взаимных лайков: {str(e)}")
             return []
+        
+    async def delete_mutual_likes(self, user1_id: int, user2_id: int) -> bool:
+        """Удаляет взаимные лайки между двумя пользователями после отправки уведомления"""
+        try:
+            logger.info(f"Удаление взаимных лайков между {user1_id} и {user2_id}")
+            async with self.pool.acquire() as conn:
+                # Удаляем лайки в обоих направлениях
+                await conn.execute("""
+                    DELETE FROM likes
+                    WHERE (sendertelegramid = $1 AND receivertelegramid = $2)
+                    OR (sendertelegramid = $2 AND receivertelegramid = $1)
+                """, user1_id, user2_id)
+                logger.info(f"Взаимные лайки между {user1_id} и {user2_id} успешно удалены")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении взаимных лайков: {e}", exc_info=True)
+            return False
 
     async def check_user_subscription(self, user_id: int) -> bool:
         """Проверяет, есть ли у пользователя активная подписка"""
@@ -813,25 +827,18 @@ class Database:
             logger.error(f"Ошибка при обновлении статуса просмотра лайков: {e}")
             return False
 
-    async def check_like_exists(self, user_id: int, liked_user_id: int) -> bool:
-        """Проверяет, существует ли уже лайк от пользователя к другому пользователю"""
+    async def check_like_exists(self, from_user_id, to_user_id):
+        """Проверяет, существует ли уже лайк от одного пользователя к другому"""
         try:
-            async with self.pool.acquire() as conn:
-                # Проверяем существование лайка в базе данных
-                result = await conn.fetchval("""
-                    SELECT EXISTS(
-                        SELECT 1 FROM likes
-                        WHERE sendertelegramid = $1 AND receivertelegramid = $2
-                    )
-                """, user_id, liked_user_id)
-
-                # Логируем результат для отладки
-                logger.debug(f"Проверка лайка от {user_id} к {liked_user_id}: {bool(result)}")
-
-                return bool(result)
+            query = """
+            SELECT likeid FROM likes 
+            WHERE sendertelegramid = $1 AND receivertelegramid = $2
+            """
+            like_id = await self.pool.fetchval(query, from_user_id, to_user_id)
+            return like_id
         except Exception as e:
-            logger.error(f"Ошибка при проверке существования лайка: {e}")
-            return False
+            logger.error(f"Ошибка при проверке существования лайка: {e}", exc_info=True)
+            return None
 
     async def debug_likes_table(self, user_id: int = None, liked_user_id: int = None):
         """Отладочный метод для проверки таблицы лайков"""

@@ -57,110 +57,193 @@ async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db
 @router.callback_query(F.data == "next_compatible")
 async def next_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
     await callback.answer()
-    # Получаем текущий индекс
+    
+    # Получаем текущий индекс и данные
     state_data = await state.get_data()
-    current_index = state_data.get("current_compatible_index", 0) + 1
+    current_index = state_data.get("current_compatible_index", 0)
     compatible_users = state_data.get("compatible_users", [])
+    
+    # Получаем историю просмотров (если её нет, создаем пустой список)
+    view_history = state_data.get("view_history", [])
+    
+    # Логируем текущее состояние перед изменениями
+    logger.info(f"NEXT: История до: {view_history}, текущий индекс: {current_index}")
+    
+    # Вычисляем следующий индекс
+    next_index = current_index + 1
+    
     # Если дошли до конца списка, начинаем сначала
-    if current_index >= len(compatible_users):
-        current_index = 0
-    # Обновляем индекс в состоянии
-    await state.update_data(current_compatible_index=current_index)
-    # Показываем следующего пользователя - ВАЖНО: передаем crypto
+    if next_index >= len(compatible_users):
+        next_index = 0
+    
+    # Добавляем текущий индекс в историю просмотров, если его там еще нет
+    if current_index not in view_history:
+        view_history.append(current_index)
+    
+    # Обновляем индекс в состоянии и историю просмотров
+    # Также сбрасываем флаг возврата, так как пользователь двигается вперед
+    await state.update_data(
+        current_compatible_index=next_index,
+        view_history=view_history,
+        already_went_back=False  # Сбрасываем флаг при движении вперед
+    )
+    
+    # Логируем обновленное состояние
+    logger.info(f"NEXT: История после: {view_history}, новый индекс: {next_index}, сброшен флаг возврата")
+    
+    # Удаляем предыдущее сообщение для избежания ошибок
+    await delete_message_safely(callback.message)
+    
+    # Показываем следующего пользователя
     await show_compatible_user(callback.message, state, db, crypto)
 
 # Обработчик начала поиска
 @router.callback_query(F.data == "start_search")
 async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService):
-    await callback.answer()
-    await callback.message.edit_text("🔍 Ищем совместимых пользователей...")
-    
-    # Получаем фильтры из состояния
-    filters = await state.get_data()
-    
-    # Используем утилиту для дешифрования города
-    city = decrypt_city(crypto, filters.get('filter_city'))
-    
-    # Создаем сервис совместимости
-    compatibility_service = CompatibilityService(db)
-    
-    # Получаем список интересов для фильтрации
-    selected_interests = filters.get('filter_interests', [])
-    
-    # Словарь соответствия интересов вопросам и ответам
-    interests_mapping = {
-        "active": {"question": 2, "answer": 1},
-        "travel": {"question": 3, "answer": 1},
-        "sport": {"question": 4, "answer": 1},
-        "animals": {"question": 5, "answer": 1},
-        "art": {"question": 6, "answer": 1},
-        "parties": {"question": 8, "answer": 2},
-        "space": {"question": 9, "answer": 1},
-        "serious": {"question": 1, "answer": 1}
-    }
-    
-    # Если выбраны интересы, берем первый из списка для фильтрации
-    filter_test_question = None
-    filter_test_answer = None
-    
-    if selected_interests:
-        # Берем первый интерес из списка для фильтрации
-        first_interest = selected_interests[0]
-        if first_interest in interests_mapping:
-            filter_test_question = interests_mapping[first_interest]["question"]
-            filter_test_answer = interests_mapping[first_interest]["answer"]
-    
-    # Ищем пользователей с учетом фильтров
-    high_compatible_users, low_compatible_users = await compatibility_service.find_compatible_users(
-        user_id=callback.from_user.id,
-        city=city,
-        age_min=filters.get('filter_age_min'),
-        age_max=filters.get('filter_age_max'),
-        gender=filters.get('filter_gender'),
-        occupation=filters.get('filter_occupation'),
-        goals=filters.get('filter_goals'),
-        filter_test_question=filter_test_question,
-        filter_test_answer=filter_test_answer,
-        limit=10,
-        min_score=50.0,
-        crypto=crypto  # Передаем объект crypto для шифрования города
-    )
-    
-    # Объединяем результаты
-    all_compatible_users = high_compatible_users + low_compatible_users
-    
-    if not all_compatible_users:
-        await callback.message.edit_text(
-            "😔 По вашим фильтрам совместимых пользователей не найдено.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")]
-            ])
+    try:
+        await callback.answer()
+        search_msg = await callback.message.edit_text("🔍 Ищем пользователей...")
+        
+        # Получаем фильтры из состояния
+        filters = await state.get_data()
+        
+        # Дешифруем город
+        city = decrypt_city(crypto, filters.get('filter_city'))
+        
+        compatibility_service = CompatibilityService(db)
+        
+        # Получаем список интересов для фильтрации
+        selected_interests = filters.get('filter_interests', [])
+        
+        interests_mapping = {
+            "active": {"question": 2, "answer": 1},
+            "travel": {"question": 3, "answer": 1},
+            "sport": {"question": 4, "answer": 1},
+            "animals": {"question": 5, "answer": 1},
+            "art": {"question": 6, "answer": 1},
+            "parties": {"question": 8, "answer": 2},
+            "space": {"question": 9, "answer": 1},
+            "serious": {"question": 1, "answer": 1}
+        }
+        
+        filter_test_question = None
+        filter_test_answer = None
+        
+        if selected_interests:
+            first_interest = selected_interests[0]
+            if first_interest in interests_mapping:
+                filter_test_question = interests_mapping[first_interest]["question"]
+                filter_test_answer = interests_mapping[first_interest]["answer"]
+        
+        # Ищем пользователей
+        high_compatible_users, low_compatible_users = await compatibility_service.find_compatible_users(
+            user_id=callback.from_user.id,
+            city=city,
+            age_min=filters.get('filter_age_min'),
+            age_max=filters.get('filter_age_max'),
+            gender=filters.get('filter_gender'),
+            occupation=filters.get('filter_occupation'),
+            goals=filters.get('filter_goals'),
+            filter_test_question=filter_test_question,
+            filter_test_answer=filter_test_answer,
+            limit=10,
+            min_score=50.0,
+            crypto=crypto
         )
-        return
-    
-    # Сохраняем результаты поиска
-    await state.update_data(
-        compatible_users=all_compatible_users,
-        current_compatible_index=0
-    )
-    
-    # Показываем первого пользователя
-    await show_compatible_user(callback.message, state, db, crypto)
+        
+        all_compatible_users = high_compatible_users + low_compatible_users
+        
+        # Пытаемся удалить сообщение о поиске
+        try:
+            await search_msg.delete()
+        except Exception as e:
+            logger.debug(f"Не удалось удалить сообщение о поиске: {e}")
+        
+        if not all_compatible_users:
+            await callback.message.answer(
+                "😔 По вашим фильтрам пользователей не найдено.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_menu")]
+                ])
+            )
+            return
+        
+        # Сохраняем результаты поиска
+        await state.update_data(
+            compatible_users=all_compatible_users,
+            current_compatible_index=0,
+            view_history=[],
+            already_went_back=False,
+            last_profile_messages=[]  # Очищаем предыдущие сообщения
+        )
+            
+        logger.info("START: Инициализирована пустая история просмотров")
+            
+        # Показываем первого пользователя
+        await show_compatible_user(callback.message, state, db, crypto)
+        
+    except Exception as e:
+        logger.error(f"Ошибка в start_search_handler: {e}", exc_info=True)
+        await callback.message.answer(
+            "⚠️ Произошла ошибка при поиске. Пожалуйста, попробуйте позже.",
+            reply_markup=back_to_menu_button()
+        )
 
 # Обработчик кнопки назад на одну анкету в ленте анкет
 @router.callback_query(F.data == "prev_compatible")
 async def prev_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
     await callback.answer()
-    # Получаем текущий индекс
+    
+    # Получаем данные из состояния
     state_data = await state.get_data()
-    current_index = state_data.get("current_compatible_index", 0) - 1  # Уменьшаем индекс
-    compatible_users = state_data.get("compatible_users", [])
-    # Если ушли в минус, переходим к последней анкете
-    if current_index < 0:
-        current_index = len(compatible_users) - 1
-    # Обновляем индекс в состоянии
-    await state.update_data(current_compatible_index=current_index)
+    current_index = state_data.get("current_compatible_index", 0)
+    view_history = state_data.get("view_history", [])
+    
+    # Получаем флаг, который показывает, использовал ли пользователь уже кнопку "Назад"
+    already_went_back = state_data.get("already_went_back", False)
+    
+    # Логируем текущее состояние
+    logger.info(f"PREV: История до: {view_history}, текущий индекс: {current_index}, уже возвращался: {already_went_back}")
+    
+    # Если пользователь уже использовал кнопку "Назад", не позволяем ему вернуться еще раз
+    if already_went_back:
+        await callback.answer("Вы можете вернуться только на одну анкету назад", show_alert=True)
+        return
+    
+    # Проверяем, есть ли предыдущая анкета в истории просмотров
+    if not view_history:
+        await callback.answer("Это первая анкета в вашей ленте", show_alert=True)
+        return
+    
+    # Определяем предыдущий индекс
+    prev_index = None
+    
+    # Если текущий индекс находится в истории, берем предыдущий элемент
+    if current_index in view_history:
+        current_position = view_history.index(current_index)
+        if current_position > 0:
+            prev_index = view_history[current_position - 1]
+    
+    # Если предыдущий индекс не определен, но история не пуста, берем последний элемент
+    if prev_index is None and view_history:
+        prev_index = view_history[-1]
+    
+    # Если предыдущий индекс все еще не определен, нельзя вернуться назад
+    if prev_index is None:
+        await callback.answer("Невозможно вернуться назад", show_alert=True)
+        return
+    
+    # Обновляем индекс в состоянии и устанавливаем флаг, что пользователь уже вернулся назад
+    await state.update_data(
+        current_compatible_index=prev_index,
+        already_went_back=True
+    )
+    
+    # Логируем обновленное состояние
+    logger.info(f"PREV: История после: {view_history}, новый индекс: {prev_index}, установлен флаг возврата")
+    
     # Удаляем предыдущее сообщение
     await delete_message_safely(callback.message)
+    
     # Показываем предыдущего пользователя
     await show_compatible_user(callback.message, state, db, crypto)
