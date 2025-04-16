@@ -546,18 +546,18 @@ class Database:
         """Добавляет лайк в базу данных и проверяет взаимность"""
         try:
             logger.info(f"Начало обработки лайка от {from_user_id} к {to_user_id}")
-            
+
             # Проверяем, существует ли уже лайк
             like_exists = await self.check_like_exists(from_user_id, to_user_id)
             logger.info(f"Лайк уже существует: {like_exists}")
-            
+
             if like_exists:
                 return like_exists
-            
+
             # Проверяем, есть ли обратный лайк
             reverse_like_exists = await self.check_like_exists(to_user_id, from_user_id)
             logger.info(f"Обратный лайк существует: {reverse_like_exists}")
-            
+
             # Добавляем лайк
             query = """
             INSERT INTO likes (sendertelegramid, receivertelegramid, likeviewedstatus)
@@ -566,19 +566,19 @@ class Database:
             """
             like_id = await self.pool.fetchval(query, from_user_id, to_user_id)
             logger.info(f"Добавлен лайк ID: {like_id}")
-            
+
             # Проверяем взаимность
             mutual_like = reverse_like_exists is not None
             logger.info(f"Взаимный лайк: {mutual_like}")
-            
+
             if bot is None:
                 logger.error("Bot object is None! Cannot send notifications")
                 return like_id
-            
+
             # Проверяем, передан ли объект crypto
             if crypto is None:
                 logger.warning("Crypto object is None! Names will not be decrypted properly")
-            
+
             if mutual_like:
                 logger.info("Отправка уведомления о матче")
                 from bot.services.notifications import send_match_notification
@@ -590,7 +590,7 @@ class Database:
                 from bot.services.notifications import send_like_notification
                 # Передаем crypto в функцию send_like_notification
                 await send_like_notification(bot, from_user_id, to_user_id, self, crypto)
-            
+
             return like_id
         except Exception as e:
             logger.error(f"Ошибка в add_like: {e}", exc_info=True)
@@ -624,7 +624,7 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при получении взаимных лайков: {str(e)}")
             return []
-        
+
     async def delete_mutual_likes(self, user1_id: int, user2_id: int) -> bool:
         """Удаляет взаимные лайки между двумя пользователями после отправки уведомления"""
         try:
@@ -837,7 +837,7 @@ class Database:
         """Проверяет, существует ли уже лайк от одного пользователя к другому"""
         try:
             query = """
-            SELECT likeid FROM likes 
+            SELECT likeid FROM likes
             WHERE sendertelegramid = $1 AND receivertelegramid = $2
             """
             like_id = await self.pool.fetchval(query, from_user_id, to_user_id)
@@ -1348,7 +1348,7 @@ class Database:
                     WHERE verificationid = $1
                 """
                 user_id = await conn.fetchval(user_query, verification_id)
-                
+
                 # Обновляем статус верификации
                 await conn.execute("""
                     UPDATE verifications
@@ -1358,7 +1358,7 @@ class Database:
                         admintelegramid = $4
                     WHERE verificationid = $3
                 """, status, rejection_reason, verification_id, admin_id)
-                
+
                 return user_id
         except Exception as e:
             logger.error(f"Ошибка обновления верификации: {e}")
@@ -1419,18 +1419,18 @@ class Database:
                 # Проверяем, есть ли уже запись с отклоненной верификацией
                 check_query = """
                     SELECT EXISTS(
-                        SELECT 1 FROM verifications 
+                        SELECT 1 FROM verifications
                         WHERE usertelegramid = $1 AND processingstatus = 'rejected'
                     )
                 """
                 has_rejected = await conn.fetchval(check_query, user_id)
-                
+
                 if has_rejected:
                     # Если есть отклоненная верификация, обновляем её
                     update_query = """
-                        UPDATE verifications 
-                        SET verificationvideofileid = $2, 
-                            processingstatus = 'open', 
+                        UPDATE verifications
+                        SET verificationvideofileid = $2,
+                            processingstatus = 'open',
                             rejectionreason = NULL,
                             verificationdate = NULL,
                             admintelegramid = NULL
@@ -1441,7 +1441,7 @@ class Database:
                 else:
                     # Иначе создаем новую запись
                     insert_query = """
-                        INSERT INTO verifications (usertelegramid, verificationvideofileid) 
+                        INSERT INTO verifications (usertelegramid, verificationvideofileid)
                         VALUES ($1, $2)
                         RETURNING TRUE
                     """
@@ -1465,7 +1465,7 @@ class Database:
                     LIMIT 1
                 """
                 record = await conn.fetchrow(status_query, user_id)
-                
+
                 if record:
                     status = record['processingstatus']
                     rejection_reason = record['rejectionreason']
@@ -1474,7 +1474,7 @@ class Database:
                     status = None
                     rejection_reason = None
                     logger.info(f"Верификация для пользователя {user_id} не найдена")
-                
+
                 # Проверяем, есть ли одобренная верификация
                 query = """
                     SELECT EXISTS(
@@ -1525,3 +1525,11 @@ class Database:
             logger.error(f"Ошибка при сохранении жалобы на анкету {reporteduser}")
             logger.exception(e)
             return None
+
+    async def update_last_action(self, user: int):
+        """Обновляет временную метку последнего действия пользователя"""
+        async with self.pool.acquire() as conn:
+            query = """UPDATE users
+                    SET lastactiondate = NOW()
+                    WHERE telegramid = $1"""
+            return await conn.execute(query, user)

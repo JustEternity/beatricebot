@@ -15,6 +15,9 @@ class DependencyInjectionMiddleware(BaseMiddleware):
             user_id = event.from_user.id
             db = data.get('db')  # Предполагаем, что экземпляр БД доступен через DI
 
+            if db:
+                await db.update_last_action(user_id)
+
             if db and await db.is_user_blocked(user_id):
                 # Отправляем сообщение о блокировке
                 if isinstance(event, Message):
