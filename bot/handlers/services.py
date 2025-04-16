@@ -129,15 +129,40 @@ async def menu_services(callback: CallbackQuery, db: Database, state: FSMContext
 
     await callback.answer()
 
+
 @router.callback_query(F.data.startswith("service_"))
 async def service_details(callback: CallbackQuery, db: Database, state: FSMContext):
-    """Обработчик для просмотра детальной информации об услуге с проверкой активных услуг"""
     try:
         service_id = int(callback.data.split("_")[1])
         user_id = callback.from_user.id
 
         # Исправляем коэффициент приоритета перед показом услуг
         await db.fix_priority_coefficient(user_id)
+
+        # Проверяем, есть ли активный буст (для услуг 2 и 3)
+        if service_id in [2, 3]:
+            active_boost = await db.pool.fetchrow(
+                """
+                SELECT * FROM purchasedservices
+                WHERE usertelegramid = $1
+                AND serviceid IN (2, 3)
+                AND serviceenddate > NOW()
+                AND paymentstatus = TRUE
+                LIMIT 1
+                """,
+                user_id
+            )
+
+            if active_boost:
+                end_date = active_boost['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+                boost_name = "24 часа" if active_boost['serviceid'] == 2 else "7 дней"
+
+                await callback.answer(
+                    f"⚠️ У вас уже активен буст на {boost_name} (до {end_date})\n"
+                    "Вы не можете активировать новый буст, пока текущий не закончится.",
+                    show_alert=True
+                )
+                return
 
         # Информация об услугах
         service_info = {
@@ -247,10 +272,34 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
 
 @router.callback_query(F.data.startswith("buy_service_"))
 async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
-    """Обработчик для покупки услуги"""
     try:
         service_id = int(callback.data.split("_")[-1])
         user_id = callback.from_user.id
+
+        # Проверяем активные бусты перед покупкой
+        if service_id in [2, 3]:
+            active_boost = await db.pool.fetchrow(
+                """
+                SELECT * FROM purchasedservices
+                WHERE usertelegramid = $1
+                AND serviceid IN (2, 3)
+                AND serviceenddate > NOW()
+                AND paymentstatus = TRUE
+                LIMIT 1
+                """,
+                user_id
+            )
+
+            if active_boost:
+                end_date = active_boost['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+                boost_name = "24 часа" if active_boost['serviceid'] == 2 else "7 дней"
+
+                await callback.answer(
+                    f"⚠️ У вас уже активен буст на {boost_name} (до {end_date})\n"
+                    "Вы не можете активировать новый буст, пока текущий не закончится.",
+                    show_alert=True
+                )
+                return
 
         # Пробуем активировать услугу
         success = await db.activate_service(user_id, service_id)
@@ -261,6 +310,9 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
             # Получаем информацию об услуге для сообщения
             service = await db.get_service_by_id(service_id)
             service_name = service['description'] if service else "услуга"
+
+            # Явно обновляем приоритет
+            await db.update_user_priority(user_id)
 
             # Получаем обновленную информацию о пользователе
             user_data = await db.get_user(user_id)

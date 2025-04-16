@@ -1019,23 +1019,43 @@ class Database:
         """Активирует услугу для пользователя, если она еще не активна"""
         try:
             async with self.pool.acquire() as conn:
-                # Проверяем, есть ли уже активная такая же услуга
-                existing_service = await conn.fetchval(
-                    """
-                    SELECT EXISTS(
-                        SELECT 1 FROM purchasedservices
+                # Для бустов (услуги 2 и 3) проверяем наличие любого активного буста
+                if service_id in [2, 3]:
+                    existing_boost = await conn.fetchrow(
+                        """
+                        SELECT serviceid, serviceenddate FROM purchasedservices
                         WHERE usertelegramid = $1
-                        AND serviceid = $2
+                        AND serviceid IN (2, 3)
                         AND serviceenddate > NOW()
                         AND paymentstatus = TRUE
+                        LIMIT 1
+                        """,
+                        user_id
                     )
-                    """,
-                    user_id, service_id
-                )
 
-                if existing_service:
-                    logger.info(f"User {user_id} tried to buy service {service_id} which is already active")
-                    return False
+                    if existing_boost:
+                        logger.info(
+                            f"User {user_id} tried to buy boost {service_id} while having active boost {existing_boost['serviceid']}")
+                        return False
+
+                # Для подписки (услуга 1) проверяем только саму подписку
+                elif service_id == 1:
+                    existing_service = await conn.fetchval(
+                        """
+                        SELECT EXISTS(
+                            SELECT 1 FROM purchasedservices
+                            WHERE usertelegramid = $1
+                            AND serviceid = 1
+                            AND serviceenddate > NOW()
+                            AND paymentstatus = TRUE
+                        )
+                        """,
+                        user_id
+                    )
+
+                    if existing_service:
+                        logger.info(f"User {user_id} tried to buy subscription which is already active")
+                        return False
 
                 # Добавляем запись о покупке услуги
                 await conn.execute(
@@ -1049,22 +1069,19 @@ class Database:
                     user_id, service_id, user_id
                 )
 
-                # Если это подписка (service_id=1), обновляем статус подписки
+                # Обновляем статус подписки если это service_id=1
                 if service_id == 1:
                     await conn.execute(
                         "UPDATE users SET subscriptionstatus = TRUE WHERE telegramid = $1",
                         user_id
                     )
-
                     await conn.execute(
-                        "INSERT INTO moderations (usertelegramid) VALUES (usertelegramid = $1)",
+                        "INSERT INTO moderations (usertelegramid) VALUES ($1)",
                         user_id
                     )
 
                 # Обновляем коэффициент приоритета
                 await self.update_user_priority(user_id)
-
-                logger.info(f"Successfully activated service {service_id} for user {user_id}")
                 return True
 
         except Exception as e:
