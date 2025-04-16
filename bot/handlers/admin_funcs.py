@@ -265,7 +265,7 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
     data = await state.get_data()
     complaints_list = data.get('complaints_list', [])
     current_idx = data.get('current_compl_index', 0)
-    
+
     if current_idx >= len(complaints_list):
         await message.answer(
             "✅ Все жалобы обработаны",
@@ -273,9 +273,9 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
         )
         await state.clear()
         return
-    
+
     complaintid, complaint_data = complaints_list[current_idx]
-    
+
     # Используем экземпляры из state
     profile = await get_user_profile(
         user_id=complaint_data[0],
@@ -285,53 +285,53 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
         s3=data.get('s3'),
         refresh_photos=False
     )
-    
+
     # Формируем сообщение
     message_text = (
         f"🛑 Жалоба #_{complaintid}_\n"
         f"▪️ На пользователя: {complaint_data[0]}\n"
         f"▪️ Причина: {complaint_data[1]}\n\n"
     )
-    
+
     if profile:
         message_text += (
             f"{profile['text']}\n\n"
         )
-        
+
         # Отправляем фотографии, если они есть
         photos = profile.get('photos', [])
-        
+
         if photos:
             try:
                 # Создаем медиагруппу со всеми фотографиями
                 media_group = []
-                
+
                 # Первое фото с подписью
                 media_group.append(InputMediaPhoto(
                     media=photos[0],
                     caption=message_text,
                     parse_mode="Markdown"
                 ))
-                
+
                 # Добавляем остальные фото (если есть)
                 for photo_id in photos[1:10]:  # Ограничиваем до 9 дополнительных фото
                     media_group.append(InputMediaPhoto(media=photo_id))
-                
+
                 # Отправляем всю медиагруппу
                 sent_messages = await message.bot.send_media_group(
                     chat_id=message.chat.id,
                     media=media_group
                 )
-                
+
                 # Отправляем кнопки отдельным сообщением, так как медиагруппа не поддерживает reply_markup
                 msg = await message.answer(
                     "Выберите действие:",
                     reply_markup=complaint_decisions()
                 )
-                
+
                 # Сохраняем ID сообщения с кнопками
                 await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
-                
+
             except Exception as e:
                 logger.error(f"Error sending media group: {e}")
                 # Если не удалось отправить медиагруппу, отправляем текст отдельно
