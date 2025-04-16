@@ -54,8 +54,6 @@ async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext,
     await callback.answer()
     # Извлекаем ID пользователя из callback_data
     liker_id = int(callback.data.split(":")[1])
-    # Отмечаем лайк как просмотренный
-    # await db.mark_likes_as_viewed(liker_id, callback.from_user.id)
     
     # Получаем данные пользователя
     user_profile = await db.get_user_profile(liker_id)
@@ -69,6 +67,14 @@ async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext,
     if not user_photos or len(user_photos) == 0:
         await callback.message.answer("У этого пользователя нет фотографий в профиле.")
         return
+    
+    # Логируем для отладки
+    logger.debug(f"User profile keys: {list(user_profile.keys())}")
+    
+    # Всегда получаем актуальный статус верификации
+    is_verified = await db.check_verify(liker_id)
+    user_profile['is_verified'] = is_verified
+    logger.debug(f"Updated is_verified status: {is_verified}")
     
     # Форматируем профиль для отображения
     profile_text = await format_profile_text(user_profile, crypto)

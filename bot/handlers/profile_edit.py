@@ -42,27 +42,28 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
                                bot: Bot, s3: S3Service):
     await delete_previous_messages(callback.message, state)
     user_id = callback.from_user.id
-
+    
     # Получаем данные пользователя
     user_data = await db.get_user_data(user_id)
-
+    
+    # Проверяем статус верификации пользователя
+    is_verified = await db.check_verify(user_id)
+    verification_status = "✅ Подтвержден" if is_verified else "✖️ Не подтвержден"
+    
     # Проверяем доступность всех фото
     need_refresh = False
     for photo in user_data.get('photos', []):
         if not await is_photo_available(bot, photo):
             need_refresh = True
             break
-
+    
     if need_refresh:
         # Получаем все S3 URL из базы
         s3_urls = [photo['s3_url'] for photo in user_data.get('photos', [])]
-
         # 1. Удаляем все старые записи
         await db.update_user_photos(user_id, [])
-
         # 2. Скачиваем фото из S3
         local_paths = await s3.download_photos_by_urls(s3_urls)
-
         # 3. Перезагружаем фото в Telegram и сохраняем новые file_id
         new_photos = []
         for path in local_paths:
@@ -76,14 +77,13 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
                 os.remove(path)
             except Exception as e:
                 logger.error(f"Error reloading photo: {str(e)}")
-
         # 4. Сохраняем новые данные
         if new_photos:
             await db.update_user_photos(user_id, new_photos)
             user_data['photos'] = new_photos
-
+    
     logger.debug(f"Retrieved profile data with keys: {list(user_data.keys())}")
-
+    
     # Декодируем зашифрованные данные
     name = crypto.decrypt(user_data['name']).decode() if isinstance(crypto.decrypt(user_data['name']),
                                                                     bytes) else crypto.decrypt(user_data['name'])
@@ -92,7 +92,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         user_data['location'])
     description = crypto.decrypt(user_data['description']).decode() if isinstance(
         crypto.decrypt(user_data['description']), bytes) else crypto.decrypt(user_data['description'])
-
+    
     # Преобразуем пол в читаемый формат
     gender_value = user_data['gender']
     if gender_value == '0' or gender_value == 0:
@@ -101,9 +101,10 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         gender_display = "👩 Женский"
     else:
         gender_display = "Не указан"
-
-    # Формируем текст анкеты
+    
+    # Формируем текст анкеты с учетом верификации
     profile_text = (
+        f"{verification_status}\n"
         f"👤 *Ваша анкета:*\n\n"
         f"*Имя:* {name}\n"
         f"*Возраст:* {user_data['age']}\n"
@@ -111,7 +112,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         f"*Местоположение:* {location}\n"
         f"*Описание:* {description}"
     )
-
+    
     # Если есть фото
     if user_data['photos']:
         # Создаем медиагруппу
@@ -123,15 +124,12 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
             )
             for i, photo_id in enumerate(user_data['photos'])
         ]
-
         # Отправляем медиагруппу и сохраняем ID сообщений
         sent_messages = await callback.message.answer_media_group(media=media_group)
         photo_message_ids = [msg.message_id for msg in sent_messages]
         await state.update_data(profile_photo_message_ids=photo_message_ids)
-
         # Отправляем кнопки управления
         await callback.message.answer("Выберите действие:", reply_markup=view_profile())
-
     # Если фото нет
     else:
         # Редактируем исходное сообщение с кнопкой
@@ -140,9 +138,10 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=view_profile()  # Ваша клавиатура для управления
         )
-
+    
     await callback.answer()
     await state.set_state(RegistrationStates.VIEW_PROFILE)
+
 
 
 # Редактирование профиля - главное меню
