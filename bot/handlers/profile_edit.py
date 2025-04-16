@@ -47,8 +47,8 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
     user_data = await db.get_user_data(user_id)
     
     # Проверяем статус верификации пользователя
-    is_verified = await db.check_verify(user_id)
-    verification_status = "✅ Подтвержден" if is_verified else "✖️ Не подтвержден"
+    is_verified, verification_status, _ = await db.check_verify(user_id)
+    verification_status_text = "✅ Подтвержден" if is_verified else "✖️ Не подтвержден"
     
     # Проверяем доступность всех фото
     need_refresh = False
@@ -104,7 +104,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
     
     # Формируем текст анкеты с учетом верификации
     profile_text = (
-        f"{verification_status}\n"
+        f"{verification_status_text}\n"
         f"👤 *Ваша анкета:*\n\n"
         f"*Имя:* {name}\n"
         f"*Возраст:* {user_data['age']}\n"
@@ -141,8 +141,6 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
     
     await callback.answer()
     await state.set_state(RegistrationStates.VIEW_PROFILE)
-
-
 
 # Редактирование профиля - главное меню
 @router.callback_query(F.data == "edit_profile")

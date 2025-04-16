@@ -72,7 +72,7 @@ async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext,
     logger.debug(f"User profile keys: {list(user_profile.keys())}")
     
     # Всегда получаем актуальный статус верификации
-    is_verified = await db.check_verify(liker_id)
+    is_verified, _, _ = await db.check_verify(liker_id)
     user_profile['is_verified'] = is_verified
     logger.debug(f"Updated is_verified status: {is_verified}")
     

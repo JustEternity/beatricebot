@@ -336,44 +336,70 @@ async def feedback_text_handler(message: Message, state: FSMContext, db: Databas
 async def start_verification_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     await delete_previous_messages(callback.message, state)
     await state.clear()
-    have_sub = await db.check_user_subscription(callback.from_user.id)
-    already_verify = await db.check_verify(callback.from_user.id)
+    user_id = callback.from_user.id
+    have_sub = await db.check_user_subscription(user_id)
+    is_verified, verification_status, rejection_reason = await db.check_verify(user_id)
+    
     if not have_sub:
         msg = await callback.message.answer(
             "Прохождение верификации доступно только пользователям с подпиской",
             reply_markup=back()
         )
         await state.set_state(RegistrationStates.MAIN_MENU)
-    elif have_sub and not already_verify:
+    elif is_verified:
+        # Если верификация уже пройдена успешно
+        likes_count = await db.get_unviewed_likes_count(user_id)
+        msg = await callback.message.answer(
+            "✅ Вы уже успешно прошли верификацию!",
+            reply_markup=main_menu(likes_count)
+        )
+        await state.set_state(RegistrationStates.MAIN_MENU)
+    elif verification_status == 'rejected':
+        # Если верификация была отклонена
+        reason_text = f"\n\nПричина отклонения: {rejection_reason}" if rejection_reason else ""
+        
+        msg = await callback.message.answer(
+            f"❌ Ваша предыдущая верификация была отклонена.{reason_text}\n\n"
+            "Вы можете отправить новое видеосообщение для верификации:",
+            reply_markup=back()
+        )
+        await state.set_state(RegistrationStates.VERIFICATION)
+        await state.update_data(edit_message_id=msg.message_id)
+    elif verification_status == 'open':
+        # Если верификация находится на рассмотрении
+        msg = await callback.message.answer(
+            "Вы уже отправили видео для верификации,\nесли вам не пришел ответ о результате,\n"
+            "отправьте сообщение обратной связи:",
+            reply_markup=back()
+        )
+        await state.set_state(RegistrationStates.MAIN_MENU)
+    else:
+        # Если записи о верификации нет
         msg = await callback.message.answer(
             "Отправьте видеосообщение для верификации:",
             reply_markup=back()
         )
         await state.set_state(RegistrationStates.VERIFICATION)
-    else:
-        msg = await callback.message.answer(
-            "Вы уже отправили видео для верификации,\nесли вам не пришел ответ о результате,\nотправьте сообщение обратной связи:",
-            reply_markup=back()
-        )
-        await state.set_state(RegistrationStates.MAIN_MENU)
-    await state.update_data(edit_message_id=msg.message_id)
+        await state.update_data(edit_message_id=msg.message_id)
+    
     await callback.answer()
 
 @router.message(RegistrationStates.VERIFICATION, F.video_note)
 async def virification_handler(message: Message, state: FSMContext, db: Database):
     video_note = message.video_note
     video_file_id = video_note.file_id
-
+    user_id = message.from_user.id
+    
     try:
         # Сохраняем file_id видеосообщения в базу данных
         success = await db.save_verification_video(
-            user_id=message.from_user.id,
-            video_file_id=video_file_id  # Передаем file_id видео
+            user_id=user_id,
+            video_file_id=video_file_id
         )
-
+        
         # Получаем количество непросмотренных лайков
-        likes_count = await db.get_unviewed_likes_count(message.from_user.id)
-
+        likes_count = await db.get_unviewed_likes_count(user_id)
+        
         # Отправляем подтверждение
         if success:
             await message.answer(
@@ -387,8 +413,12 @@ async def virification_handler(message: Message, state: FSMContext, db: Database
             )
     except Exception as e:
         logger.error(f"Ошибка сохранения видеосообщения: {str(e)}")
-        await message.answer("❌ Произошла ошибка при сохранении видеосообщения",
-                reply_markup=main_menu(likes_count))
+        likes_count = await db.get_unviewed_likes_count(user_id)
+        await message.answer(
+            "❌ Произошла ошибка при сохранении видеосообщения",
+            reply_markup=main_menu(likes_count)
+        )
+    
     await state.clear()
 
 # Обработчик любых неожиданных сообщений

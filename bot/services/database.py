@@ -1318,12 +1318,21 @@ class Database:
         self,
         admin_id: int,
         verification_id: int,
-        status: str,  # 'approved' или 'rejected'
+        status: str,  # 'approve' или 'rejected'
         rejection_reason: str = None
     ):
         """Обновляет статус верификации и причину отказа"""
         try:
             async with self.pool.acquire() as conn:
+                # Получаем user_id для отправки уведомления
+                user_query = """
+                    SELECT usertelegramid
+                    FROM verifications
+                    WHERE verificationid = $1
+                """
+                user_id = await conn.fetchval(user_query, verification_id)
+                
+                # Обновляем статус верификации
                 await conn.execute("""
                     UPDATE verifications
                     SET processingstatus = $1,
@@ -1332,8 +1341,12 @@ class Database:
                         admintelegramid = $4
                     WHERE verificationid = $3
                 """, status, rejection_reason, verification_id, admin_id)
+                
+                return user_id
         except Exception as e:
             logger.error(f"Ошибка обновления верификации: {e}")
+            logger.exception(e)
+            return None
 
     async def get_moderations(self):
         """Возвращает словарь необработанных модераций"""
@@ -1386,29 +1399,66 @@ class Database:
         logger.info(f'Сохранение в БД file_id видео для верификации пользователя {user_id}')
         try:
             async with self.pool.acquire() as conn:
-                query = "INSERT INTO verifications (usertelegramid, verificationvideofileid) VALUES ($1, $2)"
-                return await conn.execute(query, user_id, video_file_id)
+                # Проверяем, есть ли уже запись с отклоненной верификацией
+                check_query = """
+                    SELECT EXISTS(
+                        SELECT 1 FROM verifications 
+                        WHERE usertelegramid = $1 AND processingstatus = 'rejected'
+                    )
+                """
+                has_rejected = await conn.fetchval(check_query, user_id)
+                
+                if has_rejected:
+                    # Если есть отклоненная верификация, обновляем её
+                    update_query = """
+                        UPDATE verifications 
+                        SET verificationvideofileid = $2, 
+                            processingstatus = 'open', 
+                            rejectionreason = NULL,
+                            verificationdate = NULL,
+                            admintelegramid = NULL
+                        WHERE usertelegramid = $1 AND processingstatus = 'rejected'
+                        RETURNING TRUE
+                    """
+                    return await conn.fetchval(update_query, user_id, video_file_id)
+                else:
+                    # Иначе создаем новую запись
+                    insert_query = """
+                        INSERT INTO verifications (usertelegramid, verificationvideofileid) 
+                        VALUES ($1, $2)
+                        RETURNING TRUE
+                    """
+                    return await conn.fetchval(insert_query, user_id, video_file_id)
         except Exception as e:
             logger.error(f"Ошибка при сохранении видео для верификации пользователя {user_id}: {e}")
             logger.exception(e)
-            return None
+            return False
 
     async def check_verify(self, user_id: int):
-        """Проверяет, успешно ли пользователь прошел верификацию"""
+        """Проверяет, успешно ли пользователь прошел верификацию и возвращает статус и причину отклонения"""
         logger.info(f'Проверка активной верификации для пользователя {user_id}')
         try:
             async with self.pool.acquire() as conn:
-                # Сначала получим статус верификации для логирования
+                # Получаем статус верификации и причину отклонения (если есть)
                 status_query = """
-                    SELECT processingstatus
+                    SELECT processingstatus, rejectionreason
                     FROM verifications
                     WHERE usertelegramid = $1
+                    ORDER BY verificationdate DESC NULLS LAST
                     LIMIT 1
                 """
-                status = await conn.fetchval(status_query, user_id)
-                logger.info(f"Статус верификации пользователя {user_id}: {status}")
+                record = await conn.fetchrow(status_query, user_id)
                 
-                # Затем проверим, есть ли одобренная верификация
+                if record:
+                    status = record['processingstatus']
+                    rejection_reason = record['rejectionreason']
+                    logger.info(f"Статус верификации пользователя {user_id}: {status}")
+                else:
+                    status = None
+                    rejection_reason = None
+                    logger.info(f"Верификация для пользователя {user_id} не найдена")
+                
+                # Проверяем, есть ли одобренная верификация
                 query = """
                     SELECT EXISTS(
                         SELECT 1
@@ -1419,11 +1469,11 @@ class Database:
                     )
                 """
                 result = await conn.fetchval(query, user_id)
-                return bool(result)
+                return bool(result), status, rejection_reason
         except Exception as e:
             logger.error(f"Ошибка при проверке верификации пользователя {user_id}: {e}")
             logger.exception(e)
-            return False
+            return False, None, None
 
     async def del_user(self, user_id: int):
         """Удаляет всю информацию о пользователе"""
