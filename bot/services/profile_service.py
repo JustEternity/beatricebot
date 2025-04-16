@@ -128,6 +128,16 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
             await show_like_profile(message, user_id, state, db, crypto)
             return
         
+        # Логируем для отладки
+        logger.debug(f"User profile keys: {list(user_profile.keys())}")
+        logger.debug(f"is_verified in profile: {user_profile.get('is_verified')}")
+        
+        # Если по какой-то причине информация о верификации отсутствует, получаем ее отдельно
+        if 'is_verified' not in user_profile:
+            is_verified = await db.check_verify(liker_id)
+            user_profile['is_verified'] = is_verified
+            logger.debug(f"Added is_verified from check_verify: {is_verified}")
+        
         # Создаем клавиатуру
         keyboard = create_like_keyboard(liker_id)
         
@@ -137,9 +147,6 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
         # Сохраняем ID сообщения для возможного удаления в будущем
         await state.update_data(last_like_message_id=sent_message.message_id)
         
-        # ВАЖНО: НЕ отмечаем лайк как просмотренный здесь
-        # Лайк должен быть отмечен как просмотренный только после того, как пользователь
-        # выполнит действие (лайк, дизлайк, пропуск)
     except Exception as e:
         logger.error(f"Ошибка при показе профиля лайка: {e}", exc_info=True)
         await message.bot.send_message(
@@ -184,6 +191,11 @@ async def show_compatible_user(message: Message, state: FSMContext, db: Database
         current_user = compatible_users[current_index]
         user_profile = current_user['profile']
         compatibility = current_user['compatibility']
+        
+        # Проверяем верификацию пользователя
+        user_id = user_profile['telegramid']
+        is_verified = await db.check_verify(user_id)
+        user_profile['is_verified'] = is_verified
         
         # Дешифруем город в профиле, если он зашифрован
         if 'location' in user_profile:

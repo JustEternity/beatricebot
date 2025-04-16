@@ -501,9 +501,15 @@ class Database:
         try:
             async with self.pool.acquire() as conn:
                 query = """
-                    SELECT telegramid, name, age, gender, city, profiledescription
-                    FROM users
-                    WHERE telegramid = $1
+                    SELECT u.telegramid, u.name, u.age, u.gender, u.city, u.profiledescription,
+                        EXISTS(
+                            SELECT 1
+                            FROM verifications v
+                            WHERE v.usertelegramid = u.telegramid
+                            AND v.processingstatus = 'approved'
+                        ) as is_verified
+                    FROM users u
+                    WHERE u.telegramid = $1
                 """
                 result = await conn.fetchrow(query, user_id)
                 if result:
@@ -1388,23 +1394,32 @@ class Database:
             return None
 
     async def check_verify(self, user_id: int):
-        """Проверяет, проходил ли пользователь верификацию"""
+        """Проверяет, успешно ли пользователь прошел верификацию"""
         logger.info(f'Проверка активной верификации для пользователя {user_id}')
         try:
             async with self.pool.acquire() as conn:
+                # Сначала получим статус верификации для логирования
+                status_query = """
+                    SELECT processingstatus
+                    FROM verifications
+                    WHERE usertelegramid = $1
+                    LIMIT 1
+                """
+                status = await conn.fetchval(status_query, user_id)
+                logger.info(f"Статус верификации пользователя {user_id}: {status}")
+                
+                # Затем проверим, есть ли одобренная верификация
                 query = """
                     SELECT EXISTS(
                         SELECT 1
                         FROM verifications
                         WHERE
                             usertelegramid = $1
-                            AND processingstatus != 'rejected'
-                            AND processingstatus IS NOT NULL
+                            AND processingstatus = 'approve'
                     )
                 """
                 result = await conn.fetchval(query, user_id)
                 return bool(result)
-
         except Exception as e:
             logger.error(f"Ошибка при проверке верификации пользователя {user_id}: {e}")
             logger.exception(e)

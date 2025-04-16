@@ -43,6 +43,7 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
     try:
         # Логируем только базовую информацию без полных данных
         logger.debug(f"Formatting profile with keys: {list(user_data.keys())}")
+        logger.debug(f"is_verified value: {user_data.get('is_verified')}")
         
         # Проверяем, что crypto не None
         if crypto is None:
@@ -68,8 +69,19 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
                         logger.error(f"Error decrypting field {field}: {e}")
                         decrypted_data[field] = user_data[field]  # Используем исходные данные
         
-        # Форматируем текст профиля
-        profile_text = f"👤 <b>{decrypted_data.get('name', 'Без имени')}</b>, {decrypted_data.get('age', '?')} лет\n"
+        # Проверяем статус верификации
+        is_verified = decrypted_data.get('is_verified', False)
+        logger.debug(f"is_verified after decryption: {is_verified}")
+        
+        # Начинаем с информации о верификации
+        profile_text = ""
+        if is_verified:
+            profile_text = "✅ Подтвержден\n"
+        else:
+            profile_text = "✖️ Не подтвержден\n"
+        
+        # Добавляем основную информацию о пользователе
+        profile_text += f"👤 <b>{decrypted_data.get('name', 'Без имени')}</b>, {decrypted_data.get('age', '?')} лет\n"
         
         # Используем 'location' или 'city' в зависимости от того, что доступно
         location = decrypted_data.get('location') or decrypted_data.get('city', 'Город не указан')
