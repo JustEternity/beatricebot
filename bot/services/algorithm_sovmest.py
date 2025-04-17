@@ -53,7 +53,7 @@ class CompatibilityService:
         goals: str = None,
         filter_test_question: int = None,
         filter_test_answer: int = None,
-        limit: int = 10,
+        limit: int = None,
         min_score: float = 50.0,
         crypto=None
     ) -> Tuple[List[Dict], List[Dict]]:
@@ -70,7 +70,7 @@ class CompatibilityService:
             goals: Фильтр по целям знакомства
             filter_test_question: ID вопроса для фильтрации по интересам
             filter_test_answer: ID ответа для фильтрации по интересам (1 - первый вариант, 2 - второй вариант и т.д.)
-            limit: Максимальное количество результатов
+            limit: Максимальное количество результатов (None - без ограничений)
             min_score: Минимальный процент совместимости
             crypto: Сервис шифрования для дешифрования данных
             
@@ -78,7 +78,7 @@ class CompatibilityService:
             Tuple[List[Dict], List[Dict]]: Два списка пользователей -
             с высокой и низкой совместимостью
         """
-        logger.debug(f"Finding compatible users for {user_id}, filters: city={city}, age={age_min}-{age_max}, gender={gender}, occupation={occupation}, goals={goals}, test_question={filter_test_question}, test_answer={filter_test_answer}")
+        logger.info(f"Поиск пользователей для {user_id} с фильтрами: {{'city': {city}, 'age': {age_min}-{age_max}, 'gender': {gender}, 'occupation': {occupation}, 'goals': {goals}, 'test_question': {filter_test_question}, 'test_answer': {filter_test_answer}}}")
         
         # Преобразуем параметры фильтрации в целые числа, если они не None
         if filter_test_question is not None:
@@ -89,19 +89,18 @@ class CompatibilityService:
         # Получаем ответы текущего пользователя
         user_answers = await self.get_user_answers(user_id)
         if not user_answers:
-            logger.debug("User has no answers")
+            logger.info(f"Пользователь {user_id} не имеет ответов на тест")
             return [], []
-        
-        logger.debug(f"Current user answers: {user_answers}")
         
         # Получаем профиль текущего пользователя для определения пола и предпочтений
         current_user_profile = await self.db.get_user_profile(user_id)
         if not current_user_profile:
-            logger.debug("Could not get current user profile")
+            logger.warning(f"Не удалось получить профиль пользователя {user_id}")
             return [], []
         
-        # Определяем пол текущего пользователя и его предпочтения
+        # Определяем пол текущего пользователя
         current_user_gender = current_user_profile.get('gender')
+        logger.info(f"Профиль пользователя: возраст={current_user_profile.get('age')}, пол={current_user_gender}")
         
         # Если город не указан в фильтрах, используем город пользователя
         user_city = None
@@ -115,93 +114,20 @@ class CompatibilityService:
                             isinstance(encrypted_city, str) and 
                             (encrypted_city.startswith('b\'gAAAAA') or encrypted_city.startswith('gAAAAA'))):
                         user_city = crypto.decrypt(encrypted_city)
-                        logger.debug(f"Дешифрованный город пользователя: {user_city}")
                     else:
                         user_city = encrypted_city
                 except Exception as e:
                     logger.error(f"Ошибка дешифрования города пользователя: {e}")
             else:
                 user_city = encrypted_city
-                
-            logger.debug(f"Using user's city for filtering: {user_city}")
         else:
             user_city = city
         
-        # Строим базовый запрос для получения пользователей
-        query = """
-            SELECT DISTINCT u.telegramid, u.name, u.age, u.gender, u.city as location,
-                u.profiledescription as description
-            FROM users u
-            WHERE u.telegramid != $1
-        """
-        params = [user_id]
-        param_index = 2
+        logger.info(f"Дешифрованный город для поиска: {user_city}")
         
-        # Добавляем фильтр по полу - показываем только противоположный пол
-        if current_user_gender == '0':  # Мужчина ищет женщин
-            query += f" AND u.gender = '1'"
-        elif current_user_gender == '1':  # Женщина ищет мужчин
-            query += f" AND u.gender = '0'"
-        
-        # Добавляем остальные фильтры (кроме города и интересов)
-        if age_min is not None and age_max is not None:
-            query += f" AND u.age BETWEEN ${param_index} AND ${param_index + 1}"
-            params.extend([age_min, age_max])
-            param_index += 2
-        
-        if gender is not None:
-            query += f" AND u.gender = ${param_index}"
-            params.append(gender)
-            param_index += 1
-        
-        if occupation is not None:
-            query += f" AND u.occupation = ${param_index}"
-            params.append(occupation)
-            param_index += 1
-        
-        if goals is not None:
-            query += f" AND u.goals = ${param_index}"
-            params.append(goals)
-            param_index += 1
-        
-        # Если есть фильтр по интересам, добавляем JOIN с таблицей useranswers
-        if filter_test_question is not None and filter_test_answer is not None:
-            # Получаем реальный ID ответа из таблицы answers
-            # filter_test_answer - это порядковый номер ответа (1, 2, 3...), 
-            # а не его ID в таблице answers
-            answers_query = """
-                SELECT answerid FROM answers 
-                WHERE questionid = $1
-                ORDER BY answerid
-            """
-            answers = await self.db.pool.fetch(answers_query, filter_test_question)
-            logger.debug(f"Available answers for question {filter_test_question}: {[a['answerid'] for a in answers]}")
-            
-            if answers and 0 <= filter_test_answer - 1 < len(answers):
-                # Преобразуем порядковый номер ответа в его реальный ID
-                real_answer_id = answers[filter_test_answer - 1]['answerid']
-                logger.debug(f"Converted answer index {filter_test_answer} to real answer ID {real_answer_id}")
-            else:
-                # Если не можем найти ответ по индексу, используем первый доступный
-                if answers:
-                    real_answer_id = answers[0]['answerid']
-                    logger.debug(f"Using first available answer ID: {real_answer_id}")
-                else:
-                    logger.debug(f"No answers found for question {filter_test_question}")
-                    return [], []
-            
-            query = """
-                SELECT DISTINCT u.telegramid, u.name, u.age, u.gender, u.city as location,
-                    u.profiledescription as description
-                FROM users u
-                JOIN useranswers ua ON u.telegramid = ua.usertelegramid
-                WHERE u.telegramid != $1
-                AND ua.questionid = $2 AND ua.answerid = $3
-            """
-            params = [user_id, filter_test_question, real_answer_id]
-            param_index = 4
-            
-            # Добавляем фильтр по полу
+        # Вспомогательная функция для добавления фильтров к запросу
+        def add_filters_to_query(query, params, param_index):
+            # Добавляем фильтр по полу - показываем только противоположный пол
             if current_user_gender == '0':  # Мужчина ищет женщин
                 query += f" AND u.gender = '1'"
             elif current_user_gender == '1':  # Женщина ищет мужчин
@@ -227,23 +153,69 @@ class CompatibilityService:
                 query += f" AND u.goals = ${param_index}"
                 params.append(goals)
                 param_index += 1
+            
+            return query, params, param_index
+        
+        # Строим базовый запрос для получения пользователей
+        query = """
+            SELECT DISTINCT u.telegramid, u.name, u.age, u.gender, u.city as location,
+                u.profiledescription as description, u.profileprioritycoefficient
+            FROM users u
+            WHERE u.telegramid != $1
+            AND (u.accountstatus IS NULL OR u.accountstatus != 'blocked')
+        """
+        params = [user_id]
+        param_index = 2
+        
+        # Если есть фильтр по интересам, модифицируем запрос
+        if filter_test_question is not None and filter_test_answer is not None:
+            # Получаем реальный ID ответа из таблицы answers
+            answers_query = """
+                SELECT answerid FROM answers 
+                WHERE questionid = $1
+                ORDER BY answerid
+            """
+            answers = await self.db.pool.fetch(answers_query, filter_test_question)
+            
+            if answers and 0 <= filter_test_answer - 1 < len(answers):
+                # Преобразуем порядковый номер ответа в его реальный ID
+                real_answer_id = answers[filter_test_answer - 1]['answerid']
+            else:
+                # Если не можем найти ответ по индексу, используем первый доступный
+                if answers:
+                    real_answer_id = answers[0]['answerid']
+                else:
+                    logger.warning(f"Не найдены ответы для вопроса {filter_test_question}")
+                    return [], []
+            
+            # Модифицируем запрос для фильтрации по интересам
+            query = """
+                SELECT DISTINCT u.telegramid, u.name, u.age, u.gender, u.city as location,
+                    u.profiledescription as description, u.profileprioritycoefficient
+                FROM users u
+                JOIN useranswers ua ON u.telegramid = ua.usertelegramid
+                WHERE u.telegramid != $1
+                AND (u.accountstatus IS NULL OR u.accountstatus != 'blocked')
+                AND ua.questionid = $2 AND ua.answerid = $3
+            """
+            params = [user_id, filter_test_question, real_answer_id]
+            param_index = 4
+        
+        # Добавляем фильтры к запросу
+        query, params, param_index = add_filters_to_query(query, params, param_index)
         
         # Выполняем запрос
         try:
             candidates = await self.db.pool.fetch(query, *params)
-            logger.debug(f"Found {len(candidates)} candidates")
+            logger.info(f"Найдено кандидатов: {len(candidates)}")
             
             if not candidates:
+                logger.warning(f"По фильтрам пользователей не найдено для {user_id}")
                 return [], []
-            
-            # Выводим ID найденных кандидатов для отладки
-            candidate_ids = [c['telegramid'] for c in candidates]
-            logger.debug(f"Candidate IDs: {candidate_ids}")
             
             # Фильтруем по городу после получения результатов, если указан город
             filtered_candidates = []
             if user_city and crypto:
-                logger.debug(f"Фильтрация по городу: {user_city}")
                 for candidate in candidates:
                     encrypted_location = candidate['location']
                     if encrypted_location:
@@ -253,7 +225,6 @@ class CompatibilityService:
                                     isinstance(encrypted_location, str) and 
                                     (encrypted_location.startswith('b\'gAAAAA') or encrypted_location.startswith('gAAAAA'))):
                                 decrypted_location = crypto.decrypt(encrypted_location)
-                                logger.debug(f"Сравниваем города: {decrypted_location.lower()} == {user_city.lower()}")
                                 if decrypted_location.lower() == user_city.lower():
                                     filtered_candidates.append(candidate)
                             else:
@@ -264,25 +235,32 @@ class CompatibilityService:
                             logger.error(f"Ошибка дешифрования города кандидата {candidate['telegramid']}: {e}")
                 
                 candidates = filtered_candidates
-                logger.debug(f"После фильтрации по городу осталось {len(candidates)} кандидатов")
+            else:
+                # Если город не указан, используем всех кандидатов
+                filtered_candidates = candidates
             
             if not candidates:
+                logger.warning(f"После фильтрации по городу не осталось кандидатов для {user_id}")
                 return [], []
             
             # Вычисляем совместимость для каждого кандидата
             high_compatible = []
             low_compatible = []
             
+            # Счетчики для статистики
+            skipped_no_answers = 0
+            high_compat_count = 0
+            low_compat_count = 0
+            
             for candidate in candidates:
                 # Получаем ответы кандидата
                 candidate_answers = await self.get_user_answers(candidate['telegramid'])
                 if not candidate_answers:
-                    logger.debug(f"Candidate {candidate['telegramid']} has no answers, skipping")
+                    skipped_no_answers += 1
                     continue
                 
                 # Вычисляем совместимость
                 compatibility = self.calculate_compatibility(user_answers, candidate_answers)
-                logger.debug(f"Compatibility with {candidate['telegramid']}: {compatibility}%")
                 
                 # Получаем фотографии пользователя
                 photos = await self.db.get_user_photos(candidate['telegramid'])
@@ -291,27 +269,59 @@ class CompatibilityService:
                 user_profile = dict(candidate)
                 user_profile['photos'] = photos
                 
+                # Проверяем верификацию пользователя
+                is_verified, _, _ = await self.db.check_verify(candidate['telegramid'])
+                
+                # Получаем коэффициент приоритета (если не указан в профиле)
+                priority_coefficient = candidate.get('profileprioritycoefficient', 1.0)
+                
                 # Создаем результат с профилем и совместимостью
                 result = {
                     'profile': user_profile,
-                    'compatibility': round(compatibility, 1)
+                    'compatibility': round(compatibility, 1),
+                    'is_verified': is_verified,
+                    'priority_coefficient': priority_coefficient
                 }
                 
                 # Распределяем по категориям совместимости
                 if compatibility >= min_score:
                     high_compatible.append(result)
+                    high_compat_count += 1
                 else:
                     low_compatible.append(result)
+                    low_compat_count += 1
             
-            # Сортируем по совместимости (от высокой к низкой)
-            high_compatible.sort(key=lambda x: x['compatibility'], reverse=True)
-            low_compatible.sort(key=lambda x: x['compatibility'], reverse=True)
+            # Логируем статистику
+            logger.info(f"Найдено пользователей: {high_compat_count} с высокой совместимостью, {low_compat_count} с низкой")
             
-            # Ограничиваем количество результатов
-            return high_compatible[:limit], low_compatible[:limit]
-        
+            # Сортируем по верификации, коэффициенту приоритета и совместимости
+            high_compatible.sort(
+                key=lambda x: (
+                    x['is_verified'],  # Сначала верифицированные (True > False)
+                    x['priority_coefficient'],  # Затем по коэффициенту приоритета
+                    x['compatibility']  # Затем по совместимости
+                ), 
+                reverse=True
+            )
+            
+            low_compatible.sort(
+                key=lambda x: (
+                    x['is_verified'],  # Сначала верифицированные (True > False)
+                    x['priority_coefficient'],  # Затем по коэффициенту приоритета
+                    x['compatibility']  # Затем по совместимости
+                ), 
+                reverse=True
+            )
+            
+            # Применяем ограничение только если limit задан
+            if limit is not None:
+                return high_compatible[:limit], low_compatible[:limit]
+            else:
+                # Возвращаем все результаты без ограничений
+                return high_compatible, low_compatible
+            
         except Exception as e:
-            logger.error(f"Error finding compatible users: {e}")
+            logger.error(f"Ошибка при поиске совместимых пользователей: {e}")
             logger.exception(e)
             return [], []
 

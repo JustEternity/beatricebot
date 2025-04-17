@@ -106,14 +106,17 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
         
         # Получаем фильтры из состояния
         filters = await state.get_data()
+        logger.info(f"Поиск пользователей для {callback.from_user.id} с фильтрами: {filters}")
         
         # Дешифруем город
         city = decrypt_city(crypto, filters.get('filter_city'))
+        logger.info(f"Дешифрованный город для поиска: {city}")
         
         compatibility_service = CompatibilityService(db)
         
         # Получаем список интересов для фильтрации
         selected_interests = filters.get('filter_interests', [])
+        logger.info(f"Выбранные интересы: {selected_interests}")
         
         interests_mapping = {
             "active": {"question": 2, "answer": 1},
@@ -134,8 +137,21 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
             if first_interest in interests_mapping:
                 filter_test_question = interests_mapping[first_interest]["question"]
                 filter_test_answer = interests_mapping[first_interest]["answer"]
+                logger.info(f"Фильтр по интересу: вопрос {filter_test_question}, ответ {filter_test_answer}")
         
-        # Ищем пользователей
+        # Проверяем, есть ли у пользователя ответы на тест
+        has_answers = await db.check_existing_answers(callback.from_user.id)
+        logger.info(f"Пользователь {callback.from_user.id} имеет ответы на тест: {has_answers}")
+        
+        # Проверяем профиль пользователя
+        user_profile = await db.get_user_profile(callback.from_user.id)
+        if user_profile:
+            logger.info(f"Профиль пользователя: возраст={user_profile.get('age')}, пол={user_profile.get('gender')}")
+        else:
+            logger.warning(f"Профиль пользователя {callback.from_user.id} не найден")
+        
+        # Ищем пользователей - убираем параметр limit, чтобы получить всех пользователей
+        logger.info("Начинаем поиск совместимых пользователей...")
         high_compatible_users, low_compatible_users = await compatibility_service.find_compatible_users(
             user_id=callback.from_user.id,
             city=city,
@@ -146,10 +162,12 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
             goals=filters.get('filter_goals'),
             filter_test_question=filter_test_question,
             filter_test_answer=filter_test_answer,
-            limit=10,
+            limit=None,  # Изменено с 10 на None, чтобы получить всех пользователей
             min_score=50.0,
             crypto=crypto
         )
+        
+        logger.info(f"Найдено пользователей: {len(high_compatible_users)} с высокой совместимостью, {len(low_compatible_users)} с низкой")
         
         all_compatible_users = high_compatible_users + low_compatible_users
         
@@ -160,6 +178,7 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
             logger.debug(f"Не удалось удалить сообщение о поиске: {e}")
         
         if not all_compatible_users:
+            logger.warning(f"По фильтрам пользователей не найдено для {callback.from_user.id}")
             await callback.message.answer(
                 "😔 По вашим фильтрам пользователей не найдено.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -176,12 +195,11 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
             already_went_back=False,
             last_profile_messages=[]  # Очищаем предыдущие сообщения
         )
-            
-        logger.info("START: Инициализирована пустая история просмотров")
-            
+        
+        logger.info(f"START: Инициализирована пустая история просмотров, найдено {len(all_compatible_users)} пользователей")
+        
         # Показываем первого пользователя
         await show_compatible_user(callback.message, state, db, crypto)
-        
     except Exception as e:
         logger.error(f"Ошибка в start_search_handler: {e}", exc_info=True)
         await callback.message.answer(
