@@ -185,12 +185,41 @@ class Database:
                 """
 
                 result = await conn.execute(query, *values)  # Передаем все значения
+
+                if self.check_user_subscription(telegram_id) and not self.check_active_moders(telegram_id):
+                    await conn.execute(
+                            "INSERT INTO moderations (usertelegramid) VALUES ($1)",
+                            telegram_id
+                        )
                 logger.info(f"✅ Updated user {telegram_id}. Result: {result}")
                 return True
             except Exception as e:
                 logger.error(f"❌ Error updating user {telegram_id}")
                 logger.exception(e)
                 return False
+
+    async def check_active_moders(self, user_id: int):
+        """Проверка наличия активных запросов на модерацию пользователя"""
+        async with self.pool.acquire() as conn:
+            try:
+                query = """SELECT EXISTS (
+                            SELECT 1
+                            FROM moderations
+                            WHERE usertelegramid = $1
+                            AND processingstatus = 'open'
+                            LIMIT 1
+                        );"""
+                result = await conn.execute(query, user_id)
+                if result:
+                    logger.info(f'User {user_id} dont have open moders')
+                    return True
+                else:
+                    logger.info(f'User {user_id} have open moders')
+                    return False
+            except Exception as e:
+                logger.error(f"❌ Error checking moders for user {user_id}")
+                logger.exception(e)
+                return True
 
     async def update_user_photos(
         self,
@@ -223,6 +252,11 @@ class Database:
                         )
 
                     logger.info(f"✅ Added {len(photos)} photos with S3 URLs for user {usertelegramid}")
+                    if self.check_user_subscription(usertelegramid) and not self.check_active_moders(usertelegramid):
+                        await conn.execute(
+                                "INSERT INTO moderations (usertelegramid) VALUES ($1)",
+                                usertelegramid
+                            )
                     return True
 
                 except Exception as e:

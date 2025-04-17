@@ -623,8 +623,11 @@ async def moder_block_reason(message: Message, state: FSMContext, db: Database, 
     # Уведомляем пользователя
     await message.bot.send_message(
         chat_id=user_id,
-        text=f"⛔ Ваша анкета заблокирована. Причина: {reason}"
+        text=f"⛔ Ваша анкета заблокирована. Причина: {reason}\nЧтобы заполнить анкету заново, нажмите /start"
     )
 
-    await message.answer(f"⛔ Анкета заблокирована. Причина: {reason}")
+    await db.del_user(user_id)
+
+    await message.answer(f"⛔ Анкета заблокирована")
+    await state.update_data(current_moder_index=current_idx + 1)
     await show_next_moder(message, state, db, crypto, bot, s3)
