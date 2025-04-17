@@ -502,7 +502,7 @@ async def handle_skip(callback: CallbackQuery, state: FSMContext, db: Database):
 
 
 @router.callback_query(F.data == "admin_moderations")
-async def admin_moderations_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+async def admin_moderations_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService, bot: Bot, s3: S3Service):
     await delete_previous_messages(callback.message, state)
     await state.clear()
     await state.set_state(RegistrationStates.WATCH_MODER)
@@ -519,13 +519,13 @@ async def admin_moderations_handler(callback: CallbackQuery, state: FSMContext, 
         current_moder_index=0
     )
 
-    await show_next_moder(callback.message, state, db)
+    await show_next_moder(callback.message, state, db, crypto, bot, s3)
     await callback.answer()
 
-async def show_next_moder(message: Message, state: FSMContext, db: Database):
+async def show_next_moder(message: Message, state: FSMContext, db: Database, crypto: CryptoService, bot: Bot, s3: S3Service):
     data = await state.get_data()
-    moder_list = data.get('moder_list', [])
-    current_idx = data.get('current_moder_idx', 0)
+    moder_list = data.get('moders_list', [])
+    current_idx = data.get('current_moder_index', 0)
     messages_to_delete = data.get('messages_to_delete', [])
 
     # Удаляем предыдущие сообщения
@@ -547,15 +547,14 @@ async def show_next_moder(message: Message, state: FSMContext, db: Database):
     profile = await get_user_profile(
         user_id=user_id,
         db=db,
-        crypto=CryptoService,
-        bot=Bot,
-        s3=S3Service
+        crypto=crypto,
+        bot=bot,
+        s3=s3
     )
 
     if not profile:
         await message.answer("❌ Ошибка загрузки анкеты")
-        await state.update_data(current_moder_idx=current_idx + 1)
-        await show_next_moder(message, state, db)
+        await show_next_moder(message, state, db, crypto, bot, s3)
         return
 
     # Отправляем фото
@@ -575,25 +574,28 @@ async def show_next_moder(message: Message, state: FSMContext, db: Database):
 
     await state.update_data(
         current_user_id=user_id,
-        current_moder_idx=current_idx + 1,
         messages_to_delete=messages_to_delete
     )
 
 
 @router.callback_query(F.data == "moder_skip")
-async def handle_approve(callback: CallbackQuery, state: FSMContext, db: Database):
+async def handle_approve(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService, bot: Bot, s3: S3Service):
     data = await state.get_data()
     user_id = data.get('current_user_id')
-    current_idx = data.get('current_moder_idx', 0)
+    moder_list = data.get('moders_list', [])
+    current_idx = data.get('current_moder_index', 0)
+
+    moderation_id, user_id = moder_list[current_idx]
 
     await db.update_moderation_status(
-        moderationid=data[current_idx][0],
+        moderationid=moderation_id,
         status='approved',
         admin_id=callback.from_user.id, user=user_id
     )
 
     await callback.answer("✅ Анкета одобрена")
-    await show_next_moder(callback.message, state, db)
+    await state.update_data(current_moder_index=current_idx + 1)
+    await show_next_moder(callback.message, state, db, crypto, bot, s3)
 
 @router.callback_query(F.data == "moder_block")
 async def handle_block(callback: CallbackQuery, state: FSMContext):
@@ -602,14 +604,17 @@ async def handle_block(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @router.message(RegistrationStates.AWAIT_BLOCK_REASON)
-async def moder_block_reason(message: Message, state: FSMContext, db: Database):
+async def moder_block_reason(message: Message, state: FSMContext, db: Database, crypto: CryptoService, bot: Bot, s3: S3Service):
     data = await state.get_data()
     user_id = data.get('current_user_id')
-    current_idx = data.get('current_moder_idx', 0)
+    moder_list = data.get('moders_list', [])
+    current_idx = data.get('current_moder_index', 0)
     reason = message.text
 
+    moderation_id, user_id = moder_list[current_idx]
+
     await db.update_moderation_status(
-        moderationid=data[current_idx][0],
+        moderationid=moderation_id,
         status='blocked',
         admin_id=message.from_user.id,
         rejection_reason=reason
@@ -622,4 +627,4 @@ async def moder_block_reason(message: Message, state: FSMContext, db: Database):
     )
 
     await message.answer(f"⛔ Анкета заблокирована. Причина: {reason}")
-    await show_next_moder(message, state, db)
+    await show_next_moder(message, state, db, crypto, bot, s3)

@@ -1382,7 +1382,7 @@ class Database:
             }
 
         except Exception as e:
-            logger.error(f"Ошибка при получении необработанных верификаций: {e}")
+            logger.error(f"Ошибка при получении необработанных модераций: {e}")
             logger.exception(e)
             return None
 

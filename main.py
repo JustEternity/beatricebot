@@ -45,7 +45,7 @@ async def main():
 
         # Создаем сессию с таймаутом в секундах (целое число)
         session = AiohttpSession(timeout=40)  # 40 секунд
-        
+
         bot = Bot(token=config.bot_token, session=session)
         dp = Dispatcher()
 
@@ -68,10 +68,10 @@ async def main():
         dp.shutdown.register(on_shutdown)
 
         logger.info("Bot starting...")
-        
+
         # Создаем задачу для polling
         polling_task = asyncio.create_task(dp.start_polling(bot, polling_timeout=10))
-        
+
         # Ожидаем завершения задачи или KeyboardInterrupt
         try:
             await polling_task
@@ -79,7 +79,7 @@ async def main():
             logger.info("Received shutdown signal")
         except Exception as e:
             logger.exception(f"Unexpected error: {e}")
-                
+
     except Exception as e:
         logger.exception(f"Fatal error during bot initialization: {e}")
     finally:
