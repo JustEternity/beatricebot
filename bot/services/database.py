@@ -186,7 +186,7 @@ class Database:
 
                 result = await conn.execute(query, *values)  # Передаем все значения
 
-                if self.check_user_subscription(telegram_id) and not self.check_active_moders(telegram_id):
+                if await self.check_user_subscription(telegram_id) and not await self.check_active_moders(telegram_id):
                     await conn.execute(
                             "INSERT INTO moderations (usertelegramid) VALUES ($1)",
                             telegram_id
@@ -211,10 +211,10 @@ class Database:
                         );"""
                 result = await conn.execute(query, user_id)
                 if result:
-                    logger.info(f'User {user_id} dont have open moders')
+                    logger.info(f'User {user_id} have open moders')
                     return True
                 else:
-                    logger.info(f'User {user_id} have open moders')
+                    logger.info(f'User {user_id} dont have open moders')
                     return False
             except Exception as e:
                 logger.error(f"❌ Error checking moders for user {user_id}")
