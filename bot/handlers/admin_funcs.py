@@ -290,7 +290,7 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
     message_text = (
         f"🛑 Жалоба #_{complaintid}_\n"
         f"▪️ На пользователя: {complaint_data[0]}\n"
-        f"▪️ Причина: {complaint_data[1]}\n\n"
+        f"▪️ Причина: {'некорректное фото' if complaint_data[1] == 'photo' else 'некорректное описание'}\n\n"
     )
 
     if profile:
