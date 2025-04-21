@@ -69,33 +69,36 @@ async def next_compatible_handler(callback: CallbackQuery, state: FSMContext, db
     # Логируем текущее состояние перед изменениями
     logger.info(f"NEXT: История до: {view_history}, текущий индекс: {current_index}")
     
-    # Вычисляем следующий индекс
-    next_index = current_index + 1
-    
-    # Если дошли до конца списка, начинаем сначала
-    if next_index >= len(compatible_users):
-        next_index = 0
-    
     # Добавляем текущий индекс в историю просмотров, если его там еще нет
     if current_index not in view_history:
         view_history.append(current_index)
     
-    # Обновляем индекс в состоянии и историю просмотров
-    # Также сбрасываем флаг возврата, так как пользователь двигается вперед
-    await state.update_data(
-        current_compatible_index=next_index,
-        view_history=view_history,
-        already_went_back=False  # Сбрасываем флаг при движении вперед
-    )
-    
-    # Логируем обновленное состояние
-    logger.info(f"NEXT: История после: {view_history}, новый индекс: {next_index}, сброшен флаг возврата")
-    
-    # Удаляем предыдущее сообщение для избежания ошибок
-    await delete_message_safely(callback.message)
-    
-    # Показываем следующего пользователя
-    await show_compatible_user(callback.message, state, db, crypto)
+    # ИЗМЕНЕНО: Проверяем, есть ли еще анкеты
+    if current_index < len(compatible_users) - 1:
+        # Увеличиваем индекс
+        next_index = current_index + 1
+        
+        # Обновляем индекс в состоянии и историю просмотров
+        await state.update_data(
+            current_compatible_index=next_index,
+            view_history=view_history,
+            already_went_back=False  # Сбрасываем флаг при движении вперед
+        )
+        
+        # Логируем обновленное состояние
+        logger.info(f"NEXT: История после: {view_history}, новый индекс: {next_index}, сброшен флаг возврата")
+        
+        # Удаляем предыдущее сообщение для избежания ошибок
+        await delete_message_safely(callback.message)
+        
+        # Показываем следующего пользователя
+        await show_compatible_user(callback.message, state, db, crypto)
+    else:
+        # ДОБАВЛЕНО: Если анкет больше нет, отправляем сообщение
+        await callback.message.answer(
+            "Вы просмотрели все доступные анкеты. Возвращайтесь позже!",
+            reply_markup=back_to_menu_button()
+        )
 
 # Обработчик начала поиска
 @router.callback_query(F.data == "start_search")

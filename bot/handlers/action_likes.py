@@ -42,14 +42,25 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
         state_data = await state.get_data()
         compatible_users = state_data.get("compatible_users", [])
         current_index = state_data.get("current_compatible_index", 0)
+        view_history = state_data.get("view_history", [])
         rep_user = state_data.get("reported_user")
+        
         await db.save_complaint(sender=callback.from_user.id, reporteduser=rep_user, reason=callback.data.split("_")[1])
         await callback.message.answer(text="Спасибо, ваша жалоба принята")
-
+        
+        # ИСПРАВЛЕНО: Добавляем текущий индекс в историю просмотров
+        if current_index not in view_history:
+            view_history.append(current_index)
+        
         # ДОБАВЛЕНО: Переходим к следующей анкете, если она есть
         if compatible_users and current_index < len(compatible_users) - 1:
             # Увеличиваем индекс
-            await state.update_data(current_compatible_index=current_index + 1)
+            next_index = current_index + 1
+            await state.update_data(
+                current_compatible_index=next_index,
+                view_history=view_history,
+                already_went_back=False  # Сбрасываем флаг при движении вперед
+            )
             # Показываем следующую анкету
             from bot.services.profile_service import show_compatible_user
             await show_compatible_user(callback.message, state, db, crypto)
@@ -59,7 +70,6 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
                 "Вы просмотрели все доступные анкеты. Возвращайтесь позже!",
                 reply_markup=back_to_menu_button()
             )
-
     except Exception as e:
         logger.error(f"Ошибка при обработке жалобы: {e}", exc_info=True)
         # В случае ошибки, пытаемся вернуть пользователя в главное меню
@@ -71,7 +81,7 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
         except Exception:
             pass
 
-# Обработчик лайка пользователя
+# Обработчик лайка анкеты пользователя в подборе
 @router.callback_query(F.data.startswith("like_user_"))
 async def like_user_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
     try:
@@ -98,11 +108,21 @@ async def like_user_handler(callback: CallbackQuery, state: FSMContext, db: Data
         state_data = await state.get_data()
         compatible_users = state_data.get("compatible_users", [])
         current_index = state_data.get("current_compatible_index", 0)
+        view_history = state_data.get("view_history", [])
+        
+        # ИСПРАВЛЕНО: Добавляем текущий индекс в историю просмотров
+        if current_index not in view_history:
+            view_history.append(current_index)
         
         # ДОБАВЛЕНО: Переходим к следующей анкете, если она есть
         if compatible_users and current_index < len(compatible_users) - 1:
             # Увеличиваем индекс
-            await state.update_data(current_compatible_index=current_index + 1)
+            next_index = current_index + 1
+            await state.update_data(
+                current_compatible_index=next_index,
+                view_history=view_history,
+                already_went_back=False  # Сбрасываем флаг при движении вперед
+            )
             # Показываем следующую анкету
             from bot.services.profile_service import show_compatible_user
             await show_compatible_user(callback.message, state, db, crypto)
@@ -176,7 +196,6 @@ async def like_back_handler(callback: CallbackQuery, state: FSMContext, db: Data
         except Exception:
             pass
 
-# Обработчик дизлайка пользователя
 # Обработчик дизлайка пользователя
 @router.callback_query(F.data.startswith("dislike_user:"))
 async def dislike_user_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
