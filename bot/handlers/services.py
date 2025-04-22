@@ -193,7 +193,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
             f"{service['details']}\n\n"
             f"💰 <b>Стоимость:</b> {service['cost']} руб.\n"
             f"⏱ <b>Длительность:</b> {service['serviceduration']}\n"
-            f"🔝 <b>Повышение приоритета:</b> +{int(service['priorityboostvalue'])}%\n"
+            f"🔝 <b>Коэффициент приоритета:</b> {float(service['priorityboostvalue']):.2f}\n"
         )
 
         if active_service:
@@ -292,7 +292,7 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext, 
             # Формируем сообщение
             status_text = (
                 f"✅ Услуга «{service_name}» успешно активирована!\n\n"
-                f"📊 Ваш текущий приоритет: {priority_coefficient:.2f}\n"
+                f"📊 Ваш текущий коэффициент приоритета: {float(priority_coefficient):.2f}\n"
                 f"🔑 Статус подписки: {'Активна ✅' if subscription_status else 'Неактивна ❌'}"
             )
 
@@ -353,44 +353,58 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext, 
             show_alert=True
         )
 
+
 @router.callback_query(F.data == "my_services")
 async def view_my_services(callback: CallbackQuery, db: Database):
     """Показывает активные услуги пользователя"""
     try:
-        logger.debug(f"Showing services for user {callback.from_user.id}")
-        services = await db.get_user_services(callback.from_user.id)
+        user_id = callback.from_user.id
+        logger.debug(f"Showing services for user {user_id}")
+
+        # Получаем текущий коэффициент приоритета
+        user_data = await db.get_user(user_id)
+        current_priority = float(user_data['profileprioritycoefficient']) if user_data else 1.00
+
+        services = await db.get_user_services(user_id)
         logger.debug(f"Found {len(services)} services")
 
         if not services:
-            text = "У вас нет активных услуг"
+            text = "📋 <b>Ваши активные услуги</b>\n\nУ вас нет активных услуг"
         else:
-            text = "🎁 Ваши активные услуги:\n\n"
+            text = (
+                "📋 <b>Ваши активные услуги</b>\n\n"
+                f"🌟 <b>Текущий коэффициент приоритета:</b> {current_priority:.2f}\n\n"
+            )
             for service in services:
-                end_date = utc_to_local(service['serviceenddate']).strftime("%d.%m.%Y %H:%M") if service['serviceenddate'] else "не указано"
+                end_date = utc_to_local(service['serviceenddate']).strftime("%d.%m.%Y %H:%M") if service[
+                    'serviceenddate'] else "не указано"
                 text += (
-                    f"🔹 {service['description']}\n"
-                    f"   Приоритет: +{int(service['priorityboostvalue'])}%\n"
-                    f"   Действует до: {end_date}\n\n"
+                    f"🔹 <b>{service['description']}</b>\n"
+                    f"   ↳ Коэффициент: {float(service['priorityboostvalue']):.2f}\n"
+                    f"   ↳ Действует до: {end_date}\n\n"
                 )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад к услугам", callback_data="view_services")]
+        ])
 
         try:
             await callback.message.edit_text(
-                text,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="view_services")]
-                ])
+                text=text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
             )
         except Exception as e:
-            logger.error(f"Error editing message in view_my_services: {e}")
+            logger.error(f"Error editing message: {e}")
             await callback.message.answer(
-                text,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="view_services")]
-                ])
+                text=text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
             )
+
         await callback.answer()
     except Exception as e:
         logger.error(f"Error showing services: {e}", exc_info=True)
-        await callback.answer("Ошибка при загрузке услуг", show_alert=True)
+        await callback.answer("⚠️ Ошибка при загрузке услуг", show_alert=True)
 
 

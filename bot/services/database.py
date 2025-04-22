@@ -993,43 +993,27 @@ class Database:
 
     async def calculate_priority_coefficient(self, user_id: int) -> float:
         """Рассчитывает общий коэффициент приоритета пользователя"""
-        from decimal import Decimal
-
-        base_coefficient = Decimal('1.0')
         try:
             async with self.pool.acquire() as conn:
-                # Получаем активные услуги пользователя
-                query = """
-                    SELECT st.priorityboostvalue
+                # Базовый коэффициент
+                total_coefficient = 1.0
+
+                # Получаем все активные услуги
+                services = await conn.fetch(
+                    """SELECT st.priorityboostvalue 
                     FROM purchasedservices ps
                     JOIN servicetypes st ON ps.serviceid = st.serviceid
                     WHERE ps.usertelegramid = $1
-                    AND ps.serviceenddate > NOW()
-                    AND ps.paymentstatus = TRUE
-                """
-                rows = await conn.fetch(query, user_id)
-
-                # Суммируем бонусы от всех активных услуг
-                total_boost = sum(
-                    Decimal(str(row['priorityboostvalue'])) / Decimal('100.0')
-                    for row in rows
-                )
-
-                # Проверяем наличие активной подписки
-                has_subscription = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM purchasedservices "
-                    "WHERE usertelegramid = $1 AND serviceid = 1 "
-                    "AND serviceenddate > NOW() AND paymentstatus = TRUE)",
+                    AND (ps.serviceenddate IS NULL OR ps.serviceenddate > NOW())
+                    AND ps.paymentstatus = TRUE""",
                     user_id
                 )
 
-                # Добавляем бонус за подписку
-                if has_subscription:
-                    total_boost += Decimal('0.5')
+                # Суммируем коэффициенты
+                for service in services:
+                    total_coefficient += float(service['priorityboostvalue']) - 1.0
 
-                final_coefficient = base_coefficient + total_boost
-                final_coefficient = min(final_coefficient, Decimal('999.99'))  # Ограничение максимума
-                return float(final_coefficient.quantize(Decimal('0.01')))
+                return round(total_coefficient, 2)
 
         except Exception as e:
             logger.error(f"Error calculating priority for user {user_id}: {e}")
@@ -1038,7 +1022,10 @@ class Database:
     async def update_user_priority(self, user_id: int) -> bool:
         """Обновляет коэффициент приоритета пользователя в БД"""
         try:
+            # Получаем коэффициент в процентах
             new_coefficient = await self.calculate_priority_coefficient(user_id)
+
+            # Сохраняем в БД как целое число (например 150 вместо 1.5)
             async with self.pool.acquire() as conn:
                 await conn.execute(
                     "UPDATE users SET profileprioritycoefficient = $1 WHERE telegramid = $2",
