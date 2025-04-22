@@ -42,21 +42,21 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
                                bot: Bot, s3: S3Service):
     await delete_previous_messages(callback.message, state)
     user_id = callback.from_user.id
-    
+
     # Получаем данные пользователя
     user_data = await db.get_user_data(user_id)
-    
+
     # Проверяем статус верификации пользователя
     is_verified, verification_status, _ = await db.check_verify(user_id)
     verification_status_text = "✅ Подтвержден" if is_verified else "✖️ Не подтвержден"
-    
+
     # Проверяем доступность всех фото
     need_refresh = False
     for photo in user_data.get('photos', []):
         if not await is_photo_available(bot, photo):
             need_refresh = True
             break
-    
+
     if need_refresh:
         # Получаем все S3 URL из базы
         s3_urls = [photo['s3_url'] for photo in user_data.get('photos', [])]
@@ -81,9 +81,9 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         if new_photos:
             await db.update_user_photos(user_id, new_photos)
             user_data['photos'] = new_photos
-    
+
     logger.debug(f"Retrieved profile data with keys: {list(user_data.keys())}")
-    
+
     # Декодируем зашифрованные данные
     name = crypto.decrypt(user_data['name']).decode() if isinstance(crypto.decrypt(user_data['name']),
                                                                     bytes) else crypto.decrypt(user_data['name'])
@@ -92,7 +92,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         user_data['location'])
     description = crypto.decrypt(user_data['description']).decode() if isinstance(
         crypto.decrypt(user_data['description']), bytes) else crypto.decrypt(user_data['description'])
-    
+
     # Преобразуем пол в читаемый формат
     gender_value = user_data['gender']
     if gender_value == '0' or gender_value == 0:
@@ -101,7 +101,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         gender_display = "👩 Женский"
     else:
         gender_display = "Не указан"
-    
+
     # Формируем текст анкеты с учетом верификации
     profile_text = (
         f"{verification_status_text}\n"
@@ -112,7 +112,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         f"*Местоположение:* {location}\n"
         f"*Описание:* {description}"
     )
-    
+
     # Если есть фото
     if user_data['photos']:
         # Создаем медиагруппу
@@ -138,7 +138,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=view_profile()  # Ваша клавиатура для управления
         )
-    
+
     await callback.answer()
     await state.set_state(RegistrationStates.VIEW_PROFILE)
 
@@ -223,14 +223,13 @@ async def process_edit_age(message: Message, state: FSMContext, db: Database):
         if 18 <= age <= 100:
             if await db.update_user_field(message.from_user.id, age=age):
                 await message.answer(f"✅ Возраст успешно изменен на {age}!")
+                await show_edit_menu(message, state)
             else:
                 await message.answer("❌ Ошибка при обновлении возраста")
         else:
             await message.answer("⚠️ Возраст должен быть от 18 до 100 лет")
     except ValueError:
         await message.answer("⚠️ Пожалуйста, введите число")
-
-    await show_edit_menu(message, state)
 
 
 # Редактирование местоположения
@@ -305,23 +304,23 @@ async def edit_photos_handler(
         # Получаем текущие фото пользователя
         user_data = await db.get_user_data(user_id)
         current_photos = user_data.get('photos', [])
-        
+
         # Сохраняем текущие фото в состоянии
         await state.update_data(
             old_photos=current_photos,
             temp_photos=[]
         )
-        
+
         # Настраиваем интерфейс
         builder = ReplyKeyboardBuilder()
         builder.add(KeyboardButton(text="✅ Завершить"))
         builder.add(KeyboardButton(text="❌ Отмена"))
-        
+
         msg = await callback.message.answer(
             "Отправьте новые фотографии (максимум 3):",
             reply_markup=builder.as_markup(resize_keyboard=True)
         )
-        
+
         await state.update_data(edit_message_id=msg.message_id)
         await state.set_state(RegistrationStates.EDIT_PHOTOS)
         await callback.answer()
@@ -333,7 +332,7 @@ async def edit_photos_handler(
 async def process_edit_photos_cancel(
     message: Message,
     state: FSMContext):
-    
+
     await message.answer("✅ Редактирование фотографий отменено.", reply_markup=ReplyKeyboardRemove())
     await show_edit_menu(message, state)
 
@@ -348,45 +347,45 @@ async def process_edit_photos_photo(
     if len(temp_photos) >= 3:
         await message.answer("⚠️ Достигнут лимит в 3 фотографии")
         return
-    
+
     # Отправляем сообщение о проверке фото
     processing_msg = await message.answer("🔍 Проверяю фотографию... Это может занять некоторое время.")
-    
+
     try:
         # Скачиваем и обрабатываем фото
         file_id = message.photo[-1].file_id
         file = await bot.get_file(file_id)
         file_data = BytesIO()
         await bot.download_file(file.file_path, file_data)
-        
+
         # Сохраняем временный файл для анализа
         temp_path = f"temp_{message.from_user.id}.jpg"
         with open(temp_path, "wb") as f:
             f.write(file_data.getbuffer())
-        
+
         # Анализируем фото
         detector = EnhancedContentDetector()
         result = detector.analyze_image(temp_path)
-        
+
         # Удаляем временный файл
         try:
             os.remove(temp_path)
         except:
             pass
-        
+
         # Удаляем сообщение о проверке
         try:
             await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
         except Exception as e:
             logger.error(f"Error deleting processing message: {str(e)}")
-        
+
         # Проверяем наличие человека
         if not result.get('contains_person'):
             await message.answer(
                 "⚠️ На фото не обнаружен человек. Пожалуйста, отправьте фото с четко видимым лицом."
             )
             return
-        
+
         # Проверяем результат модерации
         if result.get('verdict') == '🔴 BANNED':
             violations = []
@@ -404,14 +403,14 @@ async def process_edit_photos_photo(
                 "\nПожалуйста, отправьте другое фото."
             )
             return
-        
+
         # Если фото прошло модерацию, загружаем его в S3
         file_data.seek(0)
         s3_url = await s3.upload_photo(file_data, message.from_user.id)
         if not s3_url:
             await message.answer("⚠️ Ошибка загрузки фото. Попробуйте еще раз")
             return
-        
+
         # Сохраняем данные
         temp_photos.append({
             "file_id": file_id,
@@ -419,12 +418,12 @@ async def process_edit_photos_photo(
             "moderation_result": result
         })
         await state.update_data(temp_photos=temp_photos)
-        
+
         # Обновляем клавиатуру
         builder = ReplyKeyboardBuilder()
         builder.add(KeyboardButton(text="✅ Завершить"))
         builder.add(KeyboardButton(text="❌ Отмена"))
-        
+
         await message.answer(
             f"✅ Добавлено фото ({len(temp_photos)}/3)",
             reply_markup=builder.as_markup(resize_keyboard=True)
@@ -435,7 +434,7 @@ async def process_edit_photos_photo(
             await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
         except Exception as del_err:
             logger.error(f"Error deleting processing message: {str(del_err)}")
-            
+
         logger.error(f"Photo edit error: {str(e)}")
         await message.answer("⚠️ Ошибка при обработке фото. Попробуйте еще раз")
 
@@ -449,39 +448,39 @@ async def process_edit_photos_finish(
     data = await state.get_data()
     temp_photos = data.get('temp_photos', [])
     old_photos = data.get('old_photos', [])
-    
+
     if not temp_photos:
-        await message.answer("⚠️ Вы не добавили ни одной фотографии. Редактирование отменено.", 
+        await message.answer("⚠️ Вы не добавили ни одной фотографии. Редактирование отменено.",
                             reply_markup=ReplyKeyboardRemove())
         # Восстанавливаем старые фото (они не были удалены)
         await show_edit_menu(message, state)
         return
-    
+
     try:
         # Удаляем старые фото только после успешного добавления новых
         delete_success = await s3.delete_user_photos(user_id)
         if not delete_success:
-            await message.answer("❌ Ошибка при удалении старых фото", 
+            await message.answer("❌ Ошибка при удалении старых фото",
                                reply_markup=ReplyKeyboardRemove())
             await show_edit_menu(message, state)
             return
-            
+
         # Фиксируем новые фото в базе
         if await db.update_user_photos(user_id, temp_photos):
-            await message.answer("✅ Фотографии успешно обновлены!", 
+            await message.answer("✅ Фотографии успешно обновлены!",
                                reply_markup=ReplyKeyboardRemove())
         else:
             # Если ошибка базы - восстанавливаем старые фото
             await db.update_user_photos(user_id, old_photos)
-            await message.answer("❌ Ошибка при обновлении фотографий", 
+            await message.answer("❌ Ошибка при обновлении фотографий",
                                reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         logger.error(f"Final photo update error: {str(e)}")
         # Восстанавливаем старые фото
         await db.update_user_photos(user_id, old_photos)
-        await message.answer("❌ Критическая ошибка при сохранении", 
+        await message.answer("❌ Критическая ошибка при сохранении",
                            reply_markup=ReplyKeyboardRemove())
-    
+
     await show_edit_menu(message, state)
 
 # Пройти тест - главное меню
