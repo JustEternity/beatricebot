@@ -1567,3 +1567,31 @@ class Database:
                     SET lastactiondate = NOW()
                     WHERE telegramid = $1"""
             return await conn.execute(query, user)
+
+    async def get_user_services(self, user_id: int) -> List[Dict]:
+        """Получает список активных услуг пользователя"""
+        logger.debug(f"Fetching active services for user {user_id}")
+        try:
+            async with self.pool.acquire() as conn:
+                query = """
+                    SELECT
+                        ps.recordid,
+                        ps.serviceid,
+                        ps.serviceenddate,
+                        ps.paymentstatus,
+                        st.description,
+                        st.cost,
+                        st.priorityboostvalue
+                    FROM purchasedservices ps
+                    JOIN servicetypes st ON ps.serviceid = st.serviceid
+                    WHERE
+                        ps.usertelegramid = $1 AND
+                        (ps.serviceenddate IS NULL OR ps.serviceenddate > NOW()) AND
+                        ps.paymentstatus = TRUE
+                    ORDER BY ps.serviceenddate DESC
+                """
+                rows = await conn.fetch(query, user_id)
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error fetching active services for user {user_id}: {e}")
+            return []

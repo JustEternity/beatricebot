@@ -5,6 +5,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from bot.services.database import Database
 from aiogram.filters import Command
+from bot.services.utils import utc_to_local
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -136,10 +137,8 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
         service_id = int(callback.data.split("_")[1])
         user_id = callback.from_user.id
 
-        # Исправляем коэффициент приоритета перед показом услуг
         await db.fix_priority_coefficient(user_id)
 
-        # Проверяем, есть ли активный буст (для услуг 2 и 3)
         if service_id in [2, 3]:
             active_boost = await db.pool.fetchrow(
                 """
@@ -154,7 +153,9 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
             )
 
             if active_boost:
-                end_date = active_boost['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+                end_date = (utc_to_local(active_boost['serviceenddate']).strftime("%d.%m.%Y %H:%M")
+                           if active_boost and active_boost['serviceenddate']
+                           else "не указано")
                 boost_name = "24 часа" if active_boost['serviceid'] == 2 else "7 дней"
 
                 await callback.answer(
@@ -164,35 +165,10 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
                 )
                 return
 
-        # Информация об услугах
         service_info = {
-            1: {
-                "id": 1,
-                "description": "💎 Подписка на месяц",
-                "cost": 299,
-                "serviceduration": "30 дней",
-                "priorityboostvalue": 50,
-                "availabilitystatus": True,
-                "details": "Премиум подписка на месяц дает вам приоритет в поиске и доступ ко всем функциям приложения."
-            },
-            2: {
-                "id": 2,
-                "description": "🚀 Буст видимости на 24 часа",
-                "cost": 99,
-                "serviceduration": "24 часа",
-                "priorityboostvalue": 100,
-                "availabilitystatus": True,
-                "details": "Максимальное повышение видимости вашего профиля в течение 24 часов."
-            },
-            3: {
-                "id": 3,
-                "description": "🔥 Буст видимости на 7 дней",
-                "cost": 499,
-                "serviceduration": "7 дней",
-                "priorityboostvalue": 75,
-                "availabilitystatus": True,
-                "details": "Значительное повышение видимости вашего профиля в течение недели."
-            }
+            1: {"id": 1, "description": "💎 Подписка на месяц", "cost": 299, "serviceduration": "30 дней", "priorityboostvalue": 50, "availabilitystatus": True, "details": "Премиум подписка на месяц дает вам приоритет в поиске и доступ ко всем функциям приложения."},
+            2: {"id": 2, "description": "🚀 Буст видимости на 24 часа", "cost": 99, "serviceduration": "24 часа", "priorityboostvalue": 100, "availabilitystatus": True, "details": "Максимальное повышение видимости вашего профиля в течение 24 часов."},
+            3: {"id": 3, "description": "🔥 Буст видимости на 7 дней", "cost": 499, "serviceduration": "7 дней", "priorityboostvalue": 75, "availabilitystatus": True, "details": "Значительное повышение видимости вашего профиля в течение недели."}
         }
 
         if service_id not in service_info:
@@ -201,8 +177,6 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
             return
 
         service = service_info[service_id]
-
-        # Проверяем, есть ли уже активная такая же услуга
         active_service = await db.pool.fetchrow(
             """
             SELECT * FROM purchasedservices
@@ -214,41 +188,37 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
             user_id, service_id
         )
 
-        # Формируем основное сообщение
         message_text = (
             f"<b>🔍 {service['description']}</b>\n\n"
             f"{service['details']}\n\n"
             f"💰 <b>Стоимость:</b> {service['cost']} руб.\n"
             f"⏱ <b>Длительность:</b> {service['serviceduration']}\n"
-            f"🔝 <b>Повышение приоритета:</b> +{service['priorityboostvalue']}%\n"
+            f"🔝 <b>Повышение приоритета:</b> +{int(service['priorityboostvalue'])}%\n"
         )
 
-        # Добавляем информацию об активной услуге, если она есть
         if active_service:
-            end_date = active_service['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+            end_date = (utc_to_local(active_service['serviceenddate']).strftime("%d.%m.%Y %H:%M")
+                       if active_service and active_service['serviceenddate']
+                       else "не указано")
             message_text += (
                 f"\n\n⚠️ <b>У вас уже активирована эта услуга!</b>\n"
                 f"Действует до: {end_date}"
             )
 
-        # Создаем клавиатуру в зависимости от статуса услуги
-        if active_service:
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="📋 Мои услуги", callback_data="my_services")],
-                    [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
-                    [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
-                ]
-            )
-        else:
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="💳 Приобрести", callback_data=f"buy_service_{service_id}")],
-                    [InlineKeyboardButton(text="📋 Мои услуги", callback_data="my_services")],
-                    [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
-                    [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
-                ]
-            )
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Мои услуги", callback_data="my_services")],
+                [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
+                [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
+            ]
+        ) if active_service else InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Приобрести", callback_data=f"buy_service_{service_id}")],
+                [InlineKeyboardButton(text="📋 Мои услуги", callback_data="my_services")],
+                [InlineKeyboardButton(text="◀️ К списку услуг", callback_data="view_services")],
+                [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
+            ]
+        )
 
         try:
             await callback.message.edit_text(
@@ -271,7 +241,7 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
 
 
 @router.callback_query(F.data.startswith("buy_service_"))
-async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
+async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext, self=None):
     try:
         service_id = int(callback.data.split("_")[-1])
         user_id = callback.from_user.id
@@ -363,7 +333,9 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
             )
 
             if active_services:
-                end_date = active_services[0]['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+                end_date = utc_to_local(active_boost['serviceenddate']).strftime("%d.%m.%Y %H:%M") if active_boost and \
+                                                                                                      active_boost[
+                                                                                                          'serviceenddate'] else "не указано"
                 message = (
                     f"⚠️ У вас уже активирована услуга «{service_name}»\n\n"
                     f"Она действует до: {end_date}\n\n"
@@ -385,12 +357,8 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext):
 async def view_my_services(callback: CallbackQuery, db: Database):
     """Показывает активные услуги пользователя"""
     try:
-        # Добавим логирование для отладки
         logger.debug(f"Showing services for user {callback.from_user.id}")
-
-        # Используем get_user_services вместо get_active_services
         services = await db.get_user_services(callback.from_user.id)
-
         logger.debug(f"Found {len(services)} services")
 
         if not services:
@@ -398,15 +366,14 @@ async def view_my_services(callback: CallbackQuery, db: Database):
         else:
             text = "🎁 Ваши активные услуги:\n\n"
             for service in services:
-                end_date = service['serviceenddate'].strftime("%d.%m.%Y %H:%M")
+                end_date = utc_to_local(service['serviceenddate']).strftime("%d.%m.%Y %H:%M") if service['serviceenddate'] else "не указано"
                 text += (
                     f"🔹 {service['description']}\n"
-                    f"   Приоритет: +{service['priorityboostvalue']}%\n"
+                    f"   Приоритет: +{int(service['priorityboostvalue'])}%\n"
                     f"   Действует до: {end_date}\n\n"
                 )
 
         try:
-            # Пробуем отредактировать текущее сообщение
             await callback.message.edit_text(
                 text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -415,14 +382,12 @@ async def view_my_services(callback: CallbackQuery, db: Database):
             )
         except Exception as e:
             logger.error(f"Error editing message in view_my_services: {e}")
-            # Если не получается отредактировать, отправляем новое сообщение
             await callback.message.answer(
                 text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="◀️ Назад", callback_data="view_services")]
                 ])
             )
-
         await callback.answer()
     except Exception as e:
         logger.error(f"Error showing services: {e}", exc_info=True)

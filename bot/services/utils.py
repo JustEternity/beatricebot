@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 from typing import List, Optional, Union, Dict
 from aiogram.types import Message, CallbackQuery, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
@@ -163,3 +164,9 @@ def create_media_group(photo_ids: List[str], caption: str) -> List[InputMediaPho
             parse_mode="Markdown"
         ) for i, photo_id in enumerate(photo_ids)
     ]
+
+def utc_to_local(utc_dt: datetime) -> datetime:
+    """Конвертирует UTC время в локальное (MSK, UTC+3)"""
+    if utc_dt is None:
+        return None
+    return utc_dt + timedelta(hours=3)
