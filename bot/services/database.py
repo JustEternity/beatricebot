@@ -209,7 +209,7 @@ class Database:
                             AND processingstatus = 'open'
                             LIMIT 1
                         );"""
-                result = await conn.execute(query, user_id)
+                result = await conn.fetchval(query, user_id)
                 if result:
                     logger.info(f'User {user_id} have open moders')
                     return True
