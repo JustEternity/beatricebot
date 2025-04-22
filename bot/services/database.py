@@ -1393,6 +1393,13 @@ class Database:
                     WHERE verificationid = $3
                 """, status, rejection_reason, verification_id, admin_id)
 
+                if rejection_reason == None:
+                    await conn.execute("""
+                        UPDATE users
+                        SET verificationstatus = true
+                        WHERE telegramid = $1
+                    """, user_id)
+
                 return user_id
         except Exception as e:
             logger.error(f"Ошибка обновления верификации: {e}")
