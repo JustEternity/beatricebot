@@ -166,9 +166,9 @@ async def service_details(callback: CallbackQuery, db: Database, state: FSMConte
                 return
 
         service_info = {
-            1: {"id": 1, "description": "💎 Подписка на месяц", "cost": 299, "serviceduration": "30 дней", "priorityboostvalue": 1, "availabilitystatus": True, "details": "Премиум подписка на месяц дает вам приоритет в поиске и доступ ко всем функциям приложения."},
-            2: {"id": 2, "description": "🚀 Буст видимости на 24 часа", "cost": 99, "serviceduration": "24 часа", "priorityboostvalue": 3, "availabilitystatus": True, "details": "Максимальное повышение видимости вашего профиля в течение 24 часов."},
-            3: {"id": 3, "description": "🔥 Буст видимости на 7 дней", "cost": 499, "serviceduration": "7 дней", "priorityboostvalue": 3, "availabilitystatus": True, "details": "Значительное повышение видимости вашего профиля в течение недели."}
+            1: {"id": 1, "description": "💎 Подписка на месяц", "cost": 299, "serviceduration": "30 дней", "priorityboostvalue": 1.50, "availabilitystatus": True, "details": "Премиум подписка на месяц дает вам приоритет в поиске и доступ ко всем функциям приложения."},
+            2: {"id": 2, "description": "🚀 Буст видимости на 24 часа", "cost": 99, "serviceduration": "24 часа", "priorityboostvalue": 2, "availabilitystatus": True, "details": "Максимальное повышение видимости вашего профиля в течение 24 часов."},
+            3: {"id": 3, "description": "🔥 Буст видимости на 7 дней", "cost": 499, "serviceduration": "7 дней", "priorityboostvalue": 2, "availabilitystatus": True, "details": "Значительное повышение видимости вашего профиля в течение недели."}
         }
 
         if service_id not in service_info:
@@ -274,7 +274,7 @@ async def buy_service(callback: CallbackQuery, db: Database, state: FSMContext, 
         # Пробуем активировать услугу
         success = await db.activate_service(user_id, service_id)
         if service_id == 1 and success:
-            callback.answer("Ваша анкета отправлена на модерацию", show_alert=True)
+            await callback.answer("Ваша анкета отправлена на модерацию", show_alert=True)
 
         if success:
             # Получаем информацию об услуге для сообщения

@@ -17,6 +17,7 @@ class DependencyInjectionMiddleware(BaseMiddleware):
 
             if db:
                 await db.update_last_action(user_id)
+                await db.update_user_priority(user_id)
 
             if db and await db.is_user_blocked(user_id):
                 # Отправляем сообщение о блокировке
