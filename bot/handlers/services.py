@@ -380,7 +380,7 @@ async def view_my_services(callback: CallbackQuery, db: Database):
                     'serviceenddate'] else "не указано"
                 text += (
                     f"🔹 <b>{service['description']}</b>\n"
-                    f"   ↳ Коэффициент: {float(service['priorityboostvalue']):.2f}\n"
+                    f"   ↳ Коэффициент: {float(service['priorityboostvalue']) if float(service['priorityboostvalue']) == 1.5 else 2.00:.2f}\n"
                     f"   ↳ Действует до: {end_date}\n\n"
                 )
 
