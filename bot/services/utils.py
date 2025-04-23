@@ -11,10 +11,11 @@ async def delete_previous_messages(message, state):
     try:
         data = await state.get_data()
         message_ids = data.get('message_ids', [])
-        
+        print(message_ids)
+
         if not message_ids:
             return
-        
+
         # Удаляем сообщения
         deleted_count = 0
         for msg_id in message_ids:
@@ -24,7 +25,7 @@ async def delete_previous_messages(message, state):
             except Exception as e:
                 # Логируем ошибку только на уровне DEBUG, а не ERROR
                 logger.debug(f"Could not delete message {msg_id}: {e}")
-        
+
         # Очищаем список сообщений
         await state.update_data(message_ids=[])
         logger.debug(f"Deleted {deleted_count}/{len(message_ids)} messages")
@@ -45,7 +46,7 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
         # Логируем только базовую информацию без полных данных
         logger.debug(f"Formatting profile with keys: {list(user_data.keys())}")
         logger.debug(f"is_verified value: {user_data.get('is_verified')}")
-        
+
         # Проверяем, что crypto не None
         if crypto is None:
             logger.warning("Crypto object is None in format_profile_text")
@@ -53,10 +54,10 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
         else:
             # Расшифровываем данные
             decrypted_data = user_data.copy()
-            
+
             # Определяем поля, которые могут быть зашифрованы
             encrypted_fields = ['name', 'about', 'interests', 'city', 'location', 'profiledescription']
-            
+
             for field in encrypted_fields:
                 if field in user_data and user_data[field] is not None:
                     try:
@@ -69,36 +70,36 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
                     except Exception as e:
                         logger.error(f"Error decrypting field {field}: {e}")
                         decrypted_data[field] = user_data[field]  # Используем исходные данные
-        
+
         # Проверяем статус верификации
         is_verified = decrypted_data.get('is_verified', False)
         logger.debug(f"is_verified after decryption: {is_verified}")
-        
+
         # Начинаем с информации о верификации
         profile_text = ""
         if is_verified:
             profile_text = "✅ Подтвержден\n"
         else:
             profile_text = "✖️ Не подтвержден\n"
-        
+
         # Добавляем основную информацию о пользователе
         profile_text += f"👤 <b>{decrypted_data.get('name', 'Без имени')}</b>, {decrypted_data.get('age', '?')} лет\n"
-        
+
         # Используем 'location' или 'city' в зависимости от того, что доступно
         location = decrypted_data.get('location') or decrypted_data.get('city', 'Город не указан')
         profile_text += f"🏙️ {location}\n\n"
-        
+
         # Используем 'description' или 'about' в зависимости от того, что доступно
         description = decrypted_data.get('profiledescription') or decrypted_data.get('about')
         if description:
             profile_text += f"<b>О себе:</b>\n{description}\n\n"
-        
+
         if decrypted_data.get('interests'):
             profile_text += f"<b>Интересы:</b>\n{decrypted_data.get('interests')}\n\n"
-        
+
         # Преобразуем значение пола в читаемый формат
         gender_value = decrypted_data.get('gender')
-        
+
         # Определяем отображаемый пол
         if gender_value == '0' or gender_value == 0:
             gender_display = "👨 Мужской"
@@ -106,9 +107,9 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
             gender_display = "👩 Женский"
         else:
             gender_display = "Не указан"
-        
+
         profile_text += f"<b>Пол:</b> {gender_display}\n"
-        
+
         # Преобразуем предпочтения в читаемый формат
         looking_for = decrypted_data.get('looking_for')
         if looking_for is not None:
@@ -117,23 +118,23 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
                 looking_for_display = "👨 Мужчин"
             else:
                 looking_for_display = "👩 Женщин"
-            
+
             profile_text += f"<b>Ищет:</b> {looking_for_display}\n"
-        
+
         return profile_text
     except Exception as e:
         logger.error(f"Error formatting profile text: {e}")
         logger.exception(e)
         return "Ошибка при отображении профиля"
-    
+
 def standardize_gender(gender_value):
     """Стандартизирует значение пола к строковому формату: '0' - мужской, '1' - женский"""
     logger.debug(f"Standardizing gender value: {gender_value}, type: {type(gender_value)}")
-    
+
     # Преобразуем к строчным буквам, если это строка
     if isinstance(gender_value, str):
         gender_value = gender_value.lower()
-    
+
     # Проверяем различные варианты мужского пола
     if gender_value in [0, '0', 'male', 'м', 'мужской', 'мужчина', '👨 мужской']:
         return '0'  # Возвращаем строку

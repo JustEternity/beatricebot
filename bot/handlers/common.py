@@ -86,24 +86,22 @@ async def back_to_admin_menu_handler(callback: CallbackQuery, state: FSMContext,
         await callback.message.delete()
 
         # Отправляем новое сообщение с главным меню
-        await callback.message.answer(
+        res = await callback.message.answer(
             "🔹 Главное меню администратора🔹",
             reply_markup=admin_menu()
         )
-
-        # Очищаем состояние
-        await state.clear()
+        await state.update_data(message_ids=[res.message_id])
 
     except Exception as e:
         logger.error(f"Ошибка в back_to_admin_menu_handler: {e}")
 
-        await callback.message.answer(
+        res = await callback.message.answer(
             "🔹 Главное меню администратора🔹",
             reply_markup=admin_menu()
         )
+        await state.update_data(message_ids=[res.message_id])
 
-        # Очищаем состояние
-        await state.clear()
+
 
 # Общая функция показа главного меню админа
 async def show_admin_menu(source: Message | CallbackQuery, state: FSMContext):

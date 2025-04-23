@@ -17,7 +17,7 @@ router = Router()
 @router.callback_query(F.data == "admin_reports")
 async def admin_reports_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     await delete_previous_messages(callback.message, state)
-    await state.clear()
+    #await state.clear()
     msg = await callback.message.answer(
         "Выберите отчет:",
         reply_markup=reports_menu()
@@ -88,7 +88,7 @@ async def input_year_for_count_of_regs_report(message: Message, state: FSMContex
         message_text += f'Всего регистраций за год: {total}'
 
         await message.answer(message_text, reply_markup=back_to_reports_menu())
-        await state.clear()
+        #await state.clear()
 
     except Exception as e:
         logger.error(f"Error in process_year_handler: {str(e)}")
@@ -163,12 +163,12 @@ async def input_year_for_purchased_services_report(message: Message, state: FSMC
         logger.error(f"Error in process_year_handler: {str(e)}")
         logger.exception(e)
         await message.answer("❌ Произошла ошибка при обработке отчета", reply_markup=back_to_reports_menu())
-        await state.clear()
+        #await state.clear()
 
 @router.callback_query(F.data == "admin_feedback")
 async def admin_feedback_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     await delete_previous_messages(callback.message, state)
-    await state.clear()
+    #await state.clear()
     await state.set_state(RegistrationStates.WATCH_FEEDBACK)
     feedbacks = await db.get_feedback()
     await state.update_data(feedbacks=feedbacks)
@@ -242,7 +242,7 @@ async def process_feedback_category(callback: CallbackQuery, state: FSMContext, 
 async def admin_complaints_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto, bot, s3):
     # Обратите внимание, что мы добавили параметры crypto, bot и s3
     await delete_previous_messages(callback.message, state)
-    await state.clear()
+    #await state.clear()
     await state.set_state(RegistrationStates.WATCH_COMPLAINTS)
     complaints = await db.get_complaints()
     if complaints == None or complaints == {}:
@@ -271,7 +271,7 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
             "✅ Все жалобы обработаны",
             reply_markup=back_to_admin_menu_button()
         )
-        await state.clear()
+        #await state.clear()
         return
 
     complaintid, complaint_data = complaints_list[current_idx]
@@ -394,7 +394,7 @@ async def process_complaint_category(callback: CallbackQuery, state: FSMContext,
 @router.callback_query(F.data == "admin_verifications")
 async def admin_verifications_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     await delete_previous_messages(callback.message, state)
-    await state.clear()
+    #await state.clear()
     await state.set_state(RegistrationStates.WATCH_VERIFY)
     verifs = await db.get_verifications()
     if verifs == None or verifs == {}:
@@ -428,7 +428,7 @@ async def show_next_verif(message: Message, state: FSMContext, db: Database):
     if current_idx >= len(verifs_list):
         await message.answer("✅ Все верификации обработаны",
                             reply_markup=back_to_admin_menu_button())
-        await state.clear()
+        #await state.clear()
         return
 
     verification_id, data = verifs_list[current_idx]
@@ -504,7 +504,6 @@ async def handle_skip(callback: CallbackQuery, state: FSMContext, db: Database):
 @router.callback_query(F.data == "admin_moderations")
 async def admin_moderations_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService, bot: Bot, s3: S3Service):
     await delete_previous_messages(callback.message, state)
-    await state.clear()
     await state.set_state(RegistrationStates.WATCH_MODER)
     moders = await db.get_moderations()
     if moders == None or moders == {}:
@@ -538,7 +537,7 @@ async def show_next_moder(message: Message, state: FSMContext, db: Database, cry
     if current_idx >= len(moder_list):
         await message.answer("✅ Все анкеты обработаны",
                             reply_markup=back_to_admin_menu_button())
-        await state.clear()
+        #await state.clear()
         return
 
     user_id = moder_list[current_idx][1]
