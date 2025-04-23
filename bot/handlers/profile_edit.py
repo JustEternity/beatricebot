@@ -128,6 +128,10 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
         sent_messages = await callback.message.answer_media_group(media=media_group)
         photo_message_ids = [msg.message_id for msg in sent_messages]
         await state.update_data(profile_photo_message_ids=photo_message_ids)
+        data = await state.get_data()
+        message_ids = data.get('message_ids', [])
+        message_ids.extend(photo_message_ids)
+        await state.update_data(message_ids=message_ids)
         # Отправляем кнопки управления
         await callback.message.answer("Выберите действие:", reply_markup=view_profile())
     # Если фото нет

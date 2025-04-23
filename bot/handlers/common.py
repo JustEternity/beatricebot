@@ -77,6 +77,7 @@ async def check_admin_password(message: Message, state: FSMContext, db: Database
 @router.callback_query(F.data == "back_to_admin_menu")
 async def back_to_admin_menu_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     """Универсальный обработчик возврата в меню админа"""
+    await delete_previous_messages(callback, state)
     await callback.answer()
 
     try:
@@ -120,14 +121,14 @@ async def show_admin_menu(source: Message | CallbackQuery, state: FSMContext):
         )
         await source.answer()  # Закрываем callback query
 
-    await state.update_data(last_menu_message_id=menu_message.message_id)
+    await state.update_data(message_ids=[menu_message.message_id])
     await state.set_state(RegistrationStates.ADMIN_MENU)
 
 # Обработчик команды /cancel
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext, db: Database):
     await delete_previous_messages(message, state)
-    
+
     # Проверяем, зарегистрирован ли пользователь
     user_data = await db.get_user_data(message.from_user.id)
     if not user_data:
@@ -139,13 +140,13 @@ async def cmd_cancel(message: Message, state: FSMContext, db: Database):
         # Возвращаем пользователя к началу регистрации
         await state.set_state(RegistrationStates.NAME)
         return
-    
+
     await message.answer(
         "Действие отменено. Возврат в главное меню.",
         reply_markup=ReplyKeyboardRemove()
     )
     await state.clear()
-    
+
     # Получаем количество непросмотренных лайков
     likes_count = await db.get_unviewed_likes_count(message.from_user.id)
     await show_main_menu(message, state, likes_count, db)
@@ -153,6 +154,7 @@ async def cmd_cancel(message: Message, state: FSMContext, db: Database):
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     """Универсальный обработчик возврата в меню"""
+    await delete_previous_messages(callback.message, state)
     await callback.answer()
 
     try:
@@ -163,13 +165,11 @@ async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: D
         await callback.message.delete()
 
         # Отправляем новое сообщение с главным меню
-        await callback.message.answer(
+        res = await callback.message.answer(
             "🔹 Главное меню 🔹",
             reply_markup=main_menu(unviewed_likes)
         )
-
-        # Очищаем состояние
-        await state.clear()
+        await state.update_data(message_ids=[res.message_id])
 
     except Exception as e:
         logger.error(f"Ошибка в back_to_menu_handler: {e}")
@@ -184,16 +184,13 @@ async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: D
             reply_markup=main_menu(unviewed_likes)
         )
 
-        # Очищаем состояние
-        await state.clear()
-
 # Общая функция показа главного меню
 async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, likes_count: int = 0, db: Database = None):
     await delete_previous_messages(source, state)
-    
+
     # Определяем ID пользователя в зависимости от типа source
     user_id = source.from_user.id if isinstance(source, Message) else source.from_user.id
-    
+
     # Проверяем, зарегистрирован ли пользователь, только если db передан
     if db:
         user_data = await db.get_user_data(user_id)
@@ -210,11 +207,11 @@ async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, lik
                     reply_markup=ReplyKeyboardRemove()
                 )
                 await source.answer()
-            
+
             # Возвращаем пользователя к началу регистрации
             await state.set_state(RegistrationStates.NAME)
             return
-    
+
     # Если пользователь зарегистрирован или db не передан, показываем главное меню
     if isinstance(source, Message):
         menu_message = await source.answer(
@@ -227,8 +224,8 @@ async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, lik
             reply_markup=main_menu(likes_count)
         )
         await source.answer()  # Закрываем callback query
-    
-    await state.update_data(last_menu_message_id=menu_message.message_id)
+
+    await state.update_data(message_ids=[menu_message.message_id])
     await state.set_state(RegistrationStates.MAIN_MENU)
 
 async def update_main_menu(message, state: FSMContext, db: Database):
@@ -245,18 +242,18 @@ async def update_main_menu(message, state: FSMContext, db: Database):
 async def show_filters_menu(source, state: FSMContext, db: Database, crypto: CryptoService):
     """Показывает меню фильтров"""
     data = await state.get_data()
-    
+
     # Получаем текущие значения фильтров
     filter_city = data.get('filter_city', 'Не задан')
     filter_age_min = data.get('filter_age_min')
     filter_age_max = data.get('filter_age_max')
-    
+
     # Получаем информацию о фильтрах по интересам
     filter_interests = data.get('filter_interests', [])
-    
+
     # Формируем текст с текущими фильтрами
     filters_text = "🔍 Текущие фильтры поиска:\n\n"
-    
+
     # Город
     if filter_city != 'Не задан' and crypto:
         try:
@@ -266,13 +263,13 @@ async def show_filters_menu(source, state: FSMContext, db: Database, crypto: Cry
             filters_text += f"🏙️ Город: {filter_city}\n"
     else:
         filters_text += f"🏙️ Город: {filter_city}\n"
-    
+
     # Возраст
     if filter_age_min is not None and filter_age_max is not None:
         filters_text += f"🔢 Возраст: {filter_age_min}-{filter_age_max} лет\n"
     else:
         filters_text += "🔢 Возраст: Не задан\n"
-    
+
     # Интересы (на основе теста)
     if filter_interests:
         # Словарь соответствия интересов понятным названиям
@@ -286,33 +283,33 @@ async def show_filters_menu(source, state: FSMContext, db: Database, crypto: Cry
             "space": "Интерес к космосу",
             "serious": "Серьезные отношения"
         }
-        
+
         # Формируем список названий выбранных интересов
         interest_list = [interest_names.get(interest, interest) for interest in filter_interests]
         filters_text += f"🧩 Интересы: {', '.join(interest_list)}\n"
     else:
         filters_text += "🧩 Интересы: Не заданы\n"
-    
+
     # Создаем клавиатуру с кнопками фильтров
     builder = InlineKeyboardBuilder()
-    
+
     # Кнопки для установки фильтров
     builder.button(text="🏙️ Город", callback_data="filter_city")
     builder.button(text="🔢 Возраст", callback_data="filter_age")
     builder.button(text="🧩 Интересы", callback_data="filter_interests")
-    
+
     # Кнопка сброса фильтров
     builder.button(text="🔄 Сбросить фильтры", callback_data="reset_filters")
-    
+
     # Кнопка начала поиска
     builder.button(text="🔍 Начать поиск", callback_data="start_search")
-    
+
     # Кнопка возврата в меню
     builder.button(text="◀️ Назад в меню", callback_data="back_to_menu")
-    
+
     # Настраиваем расположение кнопок (по 2 в ряд, последние три отдельно)
     builder.adjust(2, 1, 1, 1)
-    
+
     # Проверяем тип источника сообщения (CallbackQuery или Message)
     if hasattr(source, 'message'):
         # Если это CallbackQuery
@@ -379,7 +376,7 @@ async def start_verification_handler(callback: CallbackQuery, state: FSMContext,
     user_id = callback.from_user.id
     have_sub = await db.check_user_subscription(user_id)
     is_verified, verification_status, rejection_reason = await db.check_verify(user_id)
-    
+
     if not have_sub:
         msg = await callback.message.answer(
             "Прохождение верификации доступно только пользователям с подпиской",
@@ -391,13 +388,13 @@ async def start_verification_handler(callback: CallbackQuery, state: FSMContext,
         likes_count = await db.get_unviewed_likes_count(user_id)
         msg = await callback.message.answer(
             "✅ Вы уже успешно прошли верификацию!",
-            reply_markup=main_menu(likes_count)
+            reply_markup=back()
         )
         await state.set_state(RegistrationStates.MAIN_MENU)
     elif verification_status == 'rejected':
         # Если верификация была отклонена
         reason_text = f"\n\nПричина отклонения: {rejection_reason}" if rejection_reason else ""
-        
+
         msg = await callback.message.answer(
             f"❌ Ваша предыдущая верификация была отклонена.{reason_text}\n\n"
             "Вы можете отправить новое видеосообщение для верификации:",
@@ -421,7 +418,7 @@ async def start_verification_handler(callback: CallbackQuery, state: FSMContext,
         )
         await state.set_state(RegistrationStates.VERIFICATION)
         await state.update_data(edit_message_id=msg.message_id)
-    
+
     await callback.answer()
 
 @router.message(RegistrationStates.VERIFICATION, F.video_note)
@@ -429,17 +426,17 @@ async def virification_handler(message: Message, state: FSMContext, db: Database
     video_note = message.video_note
     video_file_id = video_note.file_id
     user_id = message.from_user.id
-    
+
     try:
         # Сохраняем file_id видеосообщения в базу данных
         success = await db.save_verification_video(
             user_id=user_id,
             video_file_id=video_file_id
         )
-        
+
         # Получаем количество непросмотренных лайков
         likes_count = await db.get_unviewed_likes_count(user_id)
-        
+
         # Отправляем подтверждение
         if success:
             await message.answer(
@@ -458,7 +455,7 @@ async def virification_handler(message: Message, state: FSMContext, db: Database
             "❌ Произошла ошибка при сохранении видеосообщения",
             reply_markup=main_menu(likes_count)
         )
-    
+
     await state.clear()
 
 # Обработчик любых неожиданных сообщений
@@ -511,16 +508,16 @@ async def get_user_profile(
         'photos': [],
         'user_id': user_id
     }
-    
+
     try:
         # Получаем сырые данные из БД
         user_data = await db.get_user_data(user_id)
         if not user_data:
             return None
-        
+
         # Добавим отладочную информацию
         logger.debug(f"User data: {user_data}")
-        
+
         # Проверка и обновление фото
         if refresh_photos or not user_data.get('photos'):
             # Проверяем, что photos - это список словарей с ключом 's3_url'
@@ -547,14 +544,14 @@ async def get_user_profile(
                         user_data['photos'] = new_photos
             else:
                 logger.warning(f"Invalid photos format: {photos}")
-        
+
         # Декодирование данных с проверкой на None
         try:
             # Проверяем, что crypto - это экземпляр класса
             if not isinstance(crypto, CryptoService):
                 logger.error(f"crypto is not an instance of CryptoService: {type(crypto)}")
                 raise TypeError("crypto должен быть экземпляром CryptoService")
-            
+
             decrypted_fields = {
                 'name': crypto.decrypt(user_data['name']) if user_data.get('name') else "Не указано",
                 'location': crypto.decrypt(user_data['location']) if user_data.get('location') else "Не указано",
@@ -565,7 +562,7 @@ async def get_user_profile(
             logger.error(f"Error details: {e}", exc_info=True)
             logger.error(f"Type of crypto: {type(crypto)}")
             raise
-        
+
         # Преобразование пола
         gender_map = {
             '0': "👨 Мужской",
@@ -574,7 +571,7 @@ async def get_user_profile(
             1: "👩 Женский"
         }
         gender = gender_map.get(user_data.get('gender', 'Не указан'), "Не указан")
-        
+
         # Формирование текста
         profile_text = (
             f"👤 *Профиль пользователя:*\n\n"
@@ -585,7 +582,7 @@ async def get_user_profile(
             f"▪️ Город: {decrypted_fields['location']}\n"
             f"▪️ Описание: {decrypted_fields['description']}"
         )
-        
+
         # Сборка результата
         photos_list = []
         photos = user_data.get('photos', [])
@@ -620,5 +617,5 @@ async def get_user_profile(
         # Добавляем отладочную информацию
         print(f"Отладка для {user_data}")
         return None
-    
+
     return profile_data
