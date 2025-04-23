@@ -56,7 +56,7 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
             decrypted_data = user_data.copy()
 
             # Определяем поля, которые могут быть зашифрованы
-            encrypted_fields = ['name', 'about', 'interests', 'city', 'location', 'profiledescription']
+            encrypted_fields = ['name', 'about', 'interests', 'city', 'location', 'profiledescription', 'description']
 
             for field in encrypted_fields:
                 if field in user_data and user_data[field] is not None:
@@ -90,7 +90,7 @@ async def format_profile_text(user_data: Dict, crypto=None) -> str:
         profile_text += f"🏙️ {location}\n\n"
 
         # Используем 'description' или 'about' в зависимости от того, что доступно
-        description = decrypted_data.get('profiledescription') or decrypted_data.get('about')
+        description = decrypted_data.get('profiledescription') or decrypted_data.get('description')
         if description:
             profile_text += f"<b>О себе:</b>\n{description}\n\n"
 
