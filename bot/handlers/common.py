@@ -8,6 +8,7 @@ from bot.services.database import Database
 from bot.keyboards.menus import main_menu, back_to_menu_button as back, policy_keyboard, admin_menu
 from bot.services.utils import delete_previous_messages
 from bot.services.profile_service import decrypt_city
+from bot.handlers.profile_edit import remove_keyboard_if_exists
 from bot.services.encryption import CryptoService
 from bot.texts.textforbot import POLICY_TEXT
 from bot.services.s3storage import S3Service
@@ -134,7 +135,7 @@ async def cmd_cancel(message: Message, state: FSMContext, db: Database):
     if not user_data:
         # Если пользователь не зарегистрирован, отправляем сообщение и не показываем главное меню
         await message.answer(
-            "Действие отменено. Пожалуйста, завершите регистрацию.",
+            "Действие отменено. Пожалуйста, завершите регистрацию (/start).",
             reply_markup=ReplyKeyboardRemove()
         )
         # Возвращаем пользователя к началу регистрации
@@ -327,6 +328,7 @@ async def show_filters_menu(source, state: FSMContext, db: Database, crypto: Cry
 @router.callback_query(F.data == "send_feedback")
 async def send_feedback_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database, bot: Bot, s3: S3Service):
     await delete_previous_messages(callback.message, state)
+    await remove_keyboard_if_exists(callback.message)
     await state.clear()
     msg = await callback.message.answer(
         "📝 Напишите ваше сообщение для обратной связи (максимум 500 символов):",
@@ -372,6 +374,7 @@ async def feedback_text_handler(message: Message, state: FSMContext, db: Databas
 @router.callback_query(F.data == "start_verification")
 async def start_verification_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     await delete_previous_messages(callback.message, state)
+    await remove_keyboard_if_exists(callback.message)
     await state.clear()
     user_id = callback.from_user.id
     have_sub = await db.check_user_subscription(user_id)

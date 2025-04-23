@@ -8,6 +8,7 @@ from bot.keyboards.menus import back_to_menu_button
 from bot.handlers.filtres import show_filters_menu
 from bot.services.profile_service import show_compatible_user, decrypt_city
 from bot.services.encryption import CryptoService
+from bot.handlers.profile_edit import remove_keyboard_if_exists
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ async def handle_error(message: Message, text: str):
 @router.callback_query(F.data == "find_compatible")
 async def find_compatible_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService):
     """Обработчик поиска совместимых пользователей"""
+    await remove_keyboard_if_exists(callback.message)
+
     try:
         await callback.answer()
         # Проверяем, прошел ли пользователь тест

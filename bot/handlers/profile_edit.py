@@ -40,6 +40,8 @@ async def is_photo_available(bot: Bot, file_id: str) -> bool:
 @router.callback_query(F.data == "view_profile")
 async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypto: CryptoService, db: Database,
                                bot: Bot, s3: S3Service):
+    await remove_keyboard_if_exists(callback.message)
+
     await delete_previous_messages(callback.message, state)
     user_id = callback.from_user.id
 
@@ -149,6 +151,8 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
 # Редактирование профиля - главное меню
 @router.callback_query(F.data == "edit_profile")
 async def edit_profile_handler(callback: CallbackQuery, state: FSMContext):
+    await remove_keyboard_if_exists(callback.message)
+    
     await delete_previous_messages(callback.message, state)
     await callback.message.edit_text(
         "✏️ Выберите что хотите изменить:",
@@ -167,6 +171,8 @@ async def delete_account_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "agree_del")
 async def delete_account_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    await remove_keyboard_if_exists(callback.message)
+   
     await delete_previous_messages(callback.message, state)
     res = await db.del_user(callback.from_user.id)
     if res:
@@ -295,6 +301,19 @@ async def process_edit_description(message: Message, state: FSMContext, crypto: 
 
     await show_edit_menu(message, state)
 
+
+# функция для удаления клавиатуры
+async def remove_keyboard_if_exists(message: Message):
+    try:
+        # Отправляем пустое сообщение с удалением клавиатуры
+        msg = await message.answer("⌛️...", reply_markup=ReplyKeyboardRemove())
+        # Сразу удаляем это сообщение, чтобы оно не было видно пользователю
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"Error removing keyboard: {str(e)}")
 
 # Редактирование фото
 @router.callback_query(F.data == "edit_photos")
@@ -490,6 +509,8 @@ async def process_edit_photos_finish(
 # Пройти тест - главное меню
 @router.callback_query(F.data == "take_test")
 async def take_test_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+    await remove_keyboard_if_exists(callback.message)
+    
     await delete_previous_messages(callback.message, state)
 
     user_data = await state.get_data()

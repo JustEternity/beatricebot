@@ -8,6 +8,7 @@ from bot.keyboards.menus import back_to_menu_button
 from bot.handlers.algorithm import delete_message_safely
 from bot.keyboards.menus import create_like_keyboard
 from bot.services.profile_service import show_like_profile, show_profile
+from bot.handlers.profile_edit import remove_keyboard_if_exists
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ router = Router()
 # Обработчик для просмотра лайков
 @router.callback_query(F.data == "view_likes")
 async def view_likes_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto=None):
+    await remove_keyboard_if_exists(callback.message)
     try:
         # Получаем только непросмотренные лайки
         likes = await db.get_user_likes(callback.from_user.id, only_unviewed=True)
