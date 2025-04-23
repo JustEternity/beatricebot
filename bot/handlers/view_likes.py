@@ -7,7 +7,7 @@ from bot.services.utils import format_profile_text
 from bot.keyboards.menus import back_to_menu_button
 from bot.handlers.algorithm import delete_message_safely
 from bot.keyboards.menus import create_like_keyboard
-from bot.services.profile_service import show_like_profile
+from bot.services.profile_service import show_like_profile, show_profile
 import logging
 
 logger = logging.getLogger(__name__)
@@ -76,36 +76,27 @@ async def view_liker_profile_handler(callback: CallbackQuery, state: FSMContext,
     user_profile['is_verified'] = is_verified
     logger.debug(f"Updated is_verified status: {is_verified}")
     
-    # Форматируем профиль для отображения
-    profile_text = await format_profile_text(user_profile, crypto)
     # Создаем клавиатуру с кнопками действий
     keyboard = create_like_keyboard(liker_id)
     
     try:
-        # Если текущее сообщение имеет фото, редактируем его
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption=profile_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-        else:
-            # Иначе отправляем новое сообщение с фото
-            await delete_message_safely(callback.message)
-            await callback.message.answer_photo(
-                photo=user_photos[0],
-                caption=profile_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
+        # Удаляем текущее сообщение
+        await delete_message_safely(callback.message)
+        
+        # Используем общую функцию для отображения профиля
+        await show_profile(
+            callback.message,
+            callback.from_user.id,
+            user_profile,
+            user_photos,
+            keyboard,
+            crypto
+        )
     except Exception as e:
-        logger.warning(f"Не удалось отредактировать сообщение: {e}")
-        # Если не удалось отредактировать, отправляем новое сообщение
-        await callback.message.answer_photo(
-            photo=user_photos[0],
-            caption=profile_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
+        logger.error(f"Ошибка при показе профиля лайка: {e}", exc_info=True)
+        await callback.message.answer(
+            "Произошла ошибка при загрузке профиля.",
+            reply_markup=back_to_menu_button()
         )
 
 # Показывает список не просмотренных лайков

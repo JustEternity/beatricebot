@@ -164,13 +164,11 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
         
         # Логируем для отладки
         logger.debug(f"User profile keys: {list(user_profile.keys())}")
-        logger.debug(f"is_verified in profile: {user_profile.get('is_verified')}")
         
-        # Если по какой-то причине информация о верификации отсутствует, получаем ее отдельно
-        if 'is_verified' not in user_profile:
-            is_verified, _, _ = await db.check_verify(liker_id)
-            user_profile['is_verified'] = is_verified
-            logger.debug(f"Added is_verified from check_verify: {is_verified}")
+        # ВАЖНО: Всегда получаем актуальный статус верификации
+        is_verified, _, _ = await db.check_verify(liker_id)
+        user_profile['is_verified'] = is_verified
+        logger.debug(f"Updated is_verified status: {is_verified}")
         
         # Создаем клавиатуру
         keyboard = create_like_keyboard(liker_id)

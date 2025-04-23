@@ -166,17 +166,6 @@ def edit_profile_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-def photos_edit_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура при редактировании фотографий"""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📷 Добавить еще"),
-             KeyboardButton(text="✅ Сохранить")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False
-    )
-
 def test_confirmation_keyboard() -> InlineKeyboardMarkup:
     """Подтверждение повторного прохождения теста"""
     return InlineKeyboardMarkup(
@@ -249,9 +238,9 @@ def create_like_keyboard(liker_id):
     """Создает стандартную клавиатуру для просмотра лайков с кнопкой жалобы"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="❤️ Нравится", callback_data=f"like_back:{liker_id}"),
-            InlineKeyboardButton(text="⚠️ Пожаловаться", callback_data=f"compl_user_{liker_id}"),  # Кнопка жалобы
-            InlineKeyboardButton(text="👎 Не нравится", callback_data=f"dislike_user:{liker_id}")
+            InlineKeyboardButton(text=" ❤️ ", callback_data=f"like_back:{liker_id}"),
+            InlineKeyboardButton(text=" ⚠️ ", callback_data=f"compl_user_{liker_id}"),  # Кнопка жалобы
+            InlineKeyboardButton(text=" 👎 ", callback_data=f"dislike_user:{liker_id}")
         ],
         [InlineKeyboardButton(text="◀️ Назад в главное меню", callback_data="back_to_menu")]
     ])
