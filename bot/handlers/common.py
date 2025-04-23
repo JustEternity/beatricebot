@@ -123,26 +123,32 @@ async def show_admin_menu(source: Message | CallbackQuery, state: FSMContext):
     await state.update_data(last_menu_message_id=menu_message.message_id)
     await state.set_state(RegistrationStates.ADMIN_MENU)
 
-# Обработчик команды /menu
-@router.message(Command("menu"))
-async def cmd_menu(message: Message, state: FSMContext, db: Database):
-    # Получаем количество непросмотренных лайков
-    likes_count = await db.get_unviewed_likes_count(message.from_user.id)
-    await show_main_menu(message, state, likes_count)
-
 # Обработчик команды /cancel
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext, db: Database):
     await delete_previous_messages(message, state)
+    
+    # Проверяем, зарегистрирован ли пользователь
+    user_data = await db.get_user_data(message.from_user.id)
+    if not user_data:
+        # Если пользователь не зарегистрирован, отправляем сообщение и не показываем главное меню
+        await message.answer(
+            "Действие отменено. Пожалуйста, завершите регистрацию.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        # Возвращаем пользователя к началу регистрации
+        await state.set_state(RegistrationStates.NAME)
+        return
+    
     await message.answer(
         "Действие отменено. Возврат в главное меню.",
         reply_markup=ReplyKeyboardRemove()
     )
     await state.clear()
-
+    
     # Получаем количество непросмотренных лайков
     likes_count = await db.get_unviewed_likes_count(message.from_user.id)
-    await show_main_menu(message, state, likes_count)
+    await show_main_menu(message, state, likes_count, db)
 
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: Database):
@@ -182,12 +188,46 @@ async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: D
         await state.clear()
 
 # Общая функция показа главного меню
-async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, likes_count: int = 0):
+async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, likes_count: int = 0, db: Database = None):
     await delete_previous_messages(source, state)
-    menu_message = await source.answer(
-        "🔹 Главное меню 🔹",
-        reply_markup=main_menu(likes_count)
-    )
+    
+    # Определяем ID пользователя в зависимости от типа source
+    user_id = source.from_user.id if isinstance(source, Message) else source.from_user.id
+    
+    # Проверяем, зарегистрирован ли пользователь, только если db передан
+    if db:
+        user_data = await db.get_user_data(user_id)
+        if not user_data:
+            # Если пользователь не зарегистрирован, отправляем сообщение
+            if isinstance(source, Message):
+                await source.answer(
+                    "Пожалуйста, сначала завершите регистрацию.",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+            else:  # CallbackQuery
+                await source.message.answer(
+                    "Пожалуйста, сначала завершите регистрацию.",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                await source.answer()
+            
+            # Возвращаем пользователя к началу регистрации
+            await state.set_state(RegistrationStates.NAME)
+            return
+    
+    # Если пользователь зарегистрирован или db не передан, показываем главное меню
+    if isinstance(source, Message):
+        menu_message = await source.answer(
+            "🔹 Главное меню 🔹",
+            reply_markup=main_menu(likes_count)
+        )
+    else:  # CallbackQuery
+        menu_message = await source.message.answer(
+            "🔹 Главное меню 🔹",
+            reply_markup=main_menu(likes_count)
+        )
+        await source.answer()  # Закрываем callback query
+    
     await state.update_data(last_menu_message_id=menu_message.message_id)
     await state.set_state(RegistrationStates.MAIN_MENU)
 
