@@ -357,12 +357,12 @@ async def feedback_text_handler(message: Message, state: FSMContext, db: Databas
         if success:
             await message.answer(
                 "✅ Спасибо за ваше сообщение! Мы рассмотрим его в ближайшее время.",
-                reply_markup=main_menu(likes_count)
+                reply_markup=back()
             )
         else:
             await message.answer(
                 "❌ Приносим свои извинения, произошла ошибка.\nПопробуйте позже",
-                reply_markup=main_menu(likes_count)
+                reply_markup=back()
             )
     except Exception as e:
         logger.error(f"Feedback save error: {str(e)}")
@@ -442,19 +442,19 @@ async def virification_handler(message: Message, state: FSMContext, db: Database
         if success:
             await message.answer(
                 "✅ Спасибо за ваше видеосообщение! Мы рассмотрим его в ближайшее время.",
-                reply_markup=main_menu(likes_count)
+                reply_markup=back()
             )
         else:
             await message.answer(
                 "❌ Приносим свои извинения, произошла ошибка.\nПопробуйте позже",
-                reply_markup=main_menu(likes_count)
+                reply_markup=back()
             )
     except Exception as e:
         logger.error(f"Ошибка сохранения видеосообщения: {str(e)}")
         likes_count = await db.get_unviewed_likes_count(user_id)
         await message.answer(
             "❌ Произошла ошибка при сохранении видеосообщения",
-            reply_markup=main_menu(likes_count)
+            reply_markup=back()
         )
 
     await state.clear()
