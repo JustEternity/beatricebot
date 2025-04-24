@@ -99,9 +99,12 @@ async def show_profile(
 
 def decrypt_city(crypto, encrypted_city):
     """Дешифрует город, если он зашифрован"""
-    if not encrypted_city or encrypted_city == 'Не задан' or not crypto:
-        return encrypted_city
+    if not encrypted_city or encrypted_city == 'Не задан':
+        return None  # Возвращаем None вместо 'Не задан'
     
+    if not crypto:
+        return encrypted_city
+        
     try:
         # Проверяем, является ли город зашифрованным
         if isinstance(encrypted_city, bytes) or (

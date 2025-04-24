@@ -113,7 +113,7 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
         # Получаем фильтры из состояния
         filters = await state.get_data()
         
-        # Дешифруем город
+        # Дешифруем город - теперь функция вернет None, если город 'Не задан'
         city = decrypt_city(crypto, filters.get('filter_city'))
         logger.info(f"Дешифрованный город для поиска: {city}")
         
@@ -159,7 +159,7 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
         logger.info("Начинаем поиск совместимых пользователей...")
         high_compatible_users, low_compatible_users = await compatibility_service.find_compatible_users(
             user_id=callback.from_user.id,
-            city=city,
+            city=city,  # Теперь здесь будет None, если город не задан
             age_min=filters.get('filter_age_min'),
             age_max=filters.get('filter_age_max'),
             gender=filters.get('filter_gender'),
@@ -167,7 +167,7 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
             goals=filters.get('filter_goals'),
             filter_test_question=filter_test_question,
             filter_test_answer=filter_test_answer,
-            limit=None,  # Изменено с 10 на None, чтобы получить всех пользователей
+            limit=None,
             min_score=50.0,
             crypto=crypto
         )

@@ -249,18 +249,21 @@ async def show_filters_menu(source, state: FSMContext, db: Database, crypto: Cry
     """Показывает меню фильтров"""
     await delete_previous_messages(source, state)
     data = await state.get_data()
-
+    
     # Получаем текущие значения фильтров
-    filter_city = data.get('filter_city', 'Не задан')
+    filter_city = data.get('filter_city')
+    # Если filter_city равен None, заменяем его на 'Не задан'
+    if filter_city is None:
+        filter_city = 'Не задан'
+        
     filter_age_min = data.get('filter_age_min')
     filter_age_max = data.get('filter_age_max')
-
     # Получаем информацию о фильтрах по интересам
     filter_interests = data.get('filter_interests', [])
-
+    
     # Формируем текст с текущими фильтрами
     filters_text = "🔍 Текущие фильтры поиска:\n\n"
-
+    
     # Город
     if filter_city != 'Не задан' and crypto:
         try:

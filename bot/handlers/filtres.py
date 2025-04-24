@@ -7,6 +7,7 @@ from bot.services.city_validator import city_validator
 from bot.services.encryption import CryptoService
 from bot.keyboards.menus import back_to_menu_button
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest
 import logging
 from bot.handlers.common import show_filters_menu
 
@@ -208,23 +209,38 @@ async def apply_interests_handler(callback: CallbackQuery, state: FSMContext, db
 @router.callback_query(F.data == "reset_filters")
 async def reset_filters_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService):
     await callback.answer("🔄 Фильтры сброшены")
-    
+        
     # Удаляем все фильтры из состояния
     await state.update_data(
-        filter_city=None,
+        filter_city='Не задан',  # 'Не задан' вместо None
         filter_age_min=None,
         filter_age_max=None,
         filter_interests=[],  # Сбрасываем список интересов
         filter_test_question=None,
         filter_test_answer=None
     )
-    
+        
     # Показываем обновленное меню фильтров
-    await show_filters_menu(callback, state, db, crypto)
+    try:
+        await show_filters_menu(callback, state, db, crypto)
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            # Если сообщение не изменилось, просто игнорируем ошибку
+            pass
+        else:
+            # Если другая ошибка, пробрасываем её дальше
+            raise
 
 # Обработчик для возврата в меню фильтров
 @router.callback_query(F.data == "back_to_filters")
 async def back_to_filters_handler(callback: CallbackQuery, state: FSMContext, db: Database, crypto: CryptoService):
-    await callback.answer()
-    await state.set_state(RegistrationStates.FILTERS)
-    await show_filters_menu(callback, state, db, crypto)
+    try:
+        await callback.answer()
+        await show_filters_menu(callback, state, db, crypto)
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            # Если сообщение не изменилось, просто игнорируем ошибку
+            pass
+        else:
+            # Если другая ошибка, пробрасываем её дальше
+            raise
