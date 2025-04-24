@@ -21,10 +21,17 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
         user_id = int(parts[2])
         current_user_id = callback.from_user.id
         logger.debug(f"Обработка жалобы от {current_user_id} к {user_id}")
+        
+        # Сохраняем ID пользователя, на которого жалуются
         await state.update_data(reported_user=user_id)
+        
+        # Сохраняем message_id текущей анкеты для последующего удаления
+        await state.update_data(complaint_message_id=callback.message.message_id)
+        
+        # Отправляем категории жалоб
         await callback.message.answer(text="Укажите причину жалобы:", reply_markup=complaint_categories())
+        
         await callback.answer()
-
     except Exception as e:
         logger.error(f"Ошибка при обработке жалобы: {e}", exc_info=True)
         # В случае ошибки, пытаемся вернуть пользователя в главное меню
@@ -37,7 +44,7 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
             pass
 
 @router.callback_query(F.data.startswith("incorrect_"))
-async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:Database, crypto=None):
+async def complaint_category_handler(callback: CallbackQuery, state: FSMContext, db:Database, crypto=None):
     try:
         state_data = await state.get_data()
         compatible_users = state_data.get("compatible_users", [])
@@ -45,8 +52,21 @@ async def complaint_user_handler(callback: CallbackQuery, state: FSMContext, db:
         view_history = state_data.get("view_history", [])
         rep_user = state_data.get("reported_user")
         
+        # Получаем ID сообщения с анкетой, которое нужно удалить
+        complaint_message_id = state_data.get("complaint_message_id")
+        
+        # Сохраняем жалобу в базу данных
         await db.save_complaint(sender=callback.from_user.id, reporteduser=rep_user, reason=callback.data.split("_")[1])
-        await callback.message.answer(text="Спасибо, ваша жалоба принята")
+        
+        # Удаляем сообщение с анкетой, если его ID был сохранен
+        if complaint_message_id:
+            try:
+                await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=complaint_message_id)
+            except Exception as e:
+                logger.error(f"Ошибка при удалении сообщения с анкетой: {e}")
+        
+        # Отправляем подтверждение о принятии жалобы
+        await callback.message.edit_text(text="Спасибо, ваша жалоба принята", reply_markup=None)
         
         # ИСПРАВЛЕНО: Добавляем текущий индекс в историю просмотров
         if current_index not in view_history:
