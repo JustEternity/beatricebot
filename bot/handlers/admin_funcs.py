@@ -323,6 +323,7 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
                     chat_id=message.chat.id,
                     media=media_group
                 )
+                sent_message_ids = [msg.message_id for msg in sent_messages]
 
                 # Отправляем кнопки отдельным сообщением, так как медиагруппа не поддерживает reply_markup
                 msg = await message.answer(
@@ -331,7 +332,7 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
                 )
 
                 # Сохраняем ID сообщения с кнопками
-                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
+                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0],last_message_ids=sent_message_ids)
 
             except Exception as e:
                 logger.error(f"Error sending media group: {e}")
@@ -341,7 +342,7 @@ async def show_next_complaint(message: Message, state: FSMContext, db: Database)
                     reply_markup=complaint_decisions(),
                     parse_mode="Markdown"
                 )
-                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0])
+                await state.update_data(last_message_id=msg.message_id, current_user=complaint_data[0],last_message_ids=sent_message_ids)
         else:
             # Если фотографий нет
             msg = await message.answer(
@@ -365,6 +366,17 @@ async def process_complaint_category(callback: CallbackQuery, state: FSMContext,
     user_id = data.get('current_user')
     complaints_list = data.get('complaints_list', [])
     current_idx = data.get('current_compl_index', 0)
+    last_message_ids = data.get('last_message_ids', [])
+
+    # Удаляем все сообщения из медиагруппы и кнопки
+    for msg_id in last_message_ids:
+        try:
+            await callback.bot.delete_message(
+                chat_id=callback.message.chat.id,
+                message_id=msg_id
+            )
+        except Exception as e:
+            logger.error(f"Error deleting message {msg_id}: {e}")
 
     # Удаляем предыдущее сообщение
     try:
