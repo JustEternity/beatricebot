@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from bot.services.database import Database
 from aiogram.filters import Command
-from bot.services.utils import utc_to_local
+from bot.services.utils import utc_to_local, delete_previous_messages
 from bot.handlers.profile_edit import remove_keyboard_if_exists
 
 router = Router()
@@ -53,6 +53,7 @@ async def test_services_handler(message: Message):
 @router.callback_query(F.data == "view_services")
 async def view_services(callback: CallbackQuery, db: Database, state: FSMContext):
     await remove_keyboard_if_exists(callback.message)
+    await delete_previous_messages(callback, state)
     """Обработчик для просмотра доступных услуг"""
     user_id = callback.from_user.id
     logger.info(f"Services: User {user_id} requested services list with callback data: {callback.data}")
