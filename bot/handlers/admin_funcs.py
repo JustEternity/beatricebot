@@ -29,6 +29,7 @@ async def admin_reports_handler(callback: CallbackQuery, state: FSMContext, db: 
         await callback.answer("⚠️ Отчеты не найдены!", show_alert=True)
         return
     await state.update_data(reports=reports)
+    await state.update_data(message_ids=[msg.message_id])
     await callback.answer()
 
 @router.callback_query(F.data == "get_active_users")
