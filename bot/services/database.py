@@ -252,7 +252,7 @@ class Database:
                         )
 
                     logger.info(f"✅ Added {len(photos)} photos with S3 URLs for user {usertelegramid}")
-                    if self.check_user_subscription(usertelegramid) and not self.check_active_moders(usertelegramid):
+                    if await self.check_user_subscription(usertelegramid) and not await self.check_active_moders(usertelegramid):
                         await conn.execute(
                                 "INSERT INTO moderations (usertelegramid) VALUES ($1)",
                                 usertelegramid
@@ -1000,7 +1000,7 @@ class Database:
 
                 # Получаем все активные услуги
                 services = await conn.fetch(
-                    """SELECT st.priorityboostvalue 
+                    """SELECT st.priorityboostvalue
                     FROM purchasedservices ps
                     JOIN servicetypes st ON ps.serviceid = st.serviceid
                     WHERE ps.usertelegramid = $1

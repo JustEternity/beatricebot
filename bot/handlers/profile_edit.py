@@ -483,12 +483,12 @@ async def process_edit_photos_finish(
 
     try:
         # Удаляем старые фото только после успешного добавления новых
-        delete_success = await s3.delete_user_photos(user_id)
-        if not delete_success:
-            await message.answer("❌ Ошибка при удалении старых фото",
-                               reply_markup=ReplyKeyboardRemove())
-            await show_edit_menu(message, state)
-            return
+        # delete_success = await s3.delete_user_photos(user_id)
+        # if not delete_success:
+        #     await message.answer("❌ Ошибка при удалении старых фото",
+        #                        reply_markup=ReplyKeyboardRemove())
+        #     await show_edit_menu(message, state)
+        #     return
 
         # Фиксируем новые фото в базе
         if await db.update_user_photos(user_id, temp_photos):
