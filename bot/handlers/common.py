@@ -153,35 +153,42 @@ async def cmd_cancel(message: Message, state: FSMContext, db: Database):
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     """Универсальный обработчик возврата в меню"""
+    # Сначала удаляем предыдущие сообщения
     await delete_previous_messages(callback.message, state)
     await callback.answer()
-
+    
     try:
         # Получаем количество непросмотренных лайков
         unviewed_likes = await db.get_unviewed_likes_count(callback.from_user.id)
-
-        # Удаляем текущее сообщение
-        await callback.message.delete()
-
+        
+        # Пробуем удалить текущее сообщение
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logger.debug(f"Не удалось удалить текущее сообщение: {e}")
+        
         # Отправляем новое сообщение с главным меню
         res = await callback.message.answer(
             "🔹 Главное меню 🔹",
             reply_markup=main_menu(unviewed_likes)
         )
+        
+        # Сохраняем ID нового сообщения
         await state.update_data(message_ids=[res.message_id])
-
+        
     except Exception as e:
         logger.error(f"Ошибка в back_to_menu_handler: {e}")
-        # Если не получилось удалить сообщение, отправляем новое
+        # Если не получилось, отправляем новое сообщение
         try:
             unviewed_likes = await db.get_unviewed_likes_count(callback.from_user.id)
         except:
             unviewed_likes = 0
-
-        await callback.message.answer(
+            
+        res = await callback.message.answer(
             "🔹 Главное меню 🔹",
             reply_markup=main_menu(unviewed_likes)
         )
+        await state.update_data(message_ids=[res.message_id])
 
 # Общая функция показа главного меню
 async def show_main_menu(source: Message | CallbackQuery, state: FSMContext, likes_count: int = 0, db: Database = None):

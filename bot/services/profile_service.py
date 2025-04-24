@@ -17,8 +17,7 @@ async def show_profile(
     photos: list,
     keyboard,
     crypto=None,
-    additional_text=""
-):
+    additional_text=""):
     try:
         # Форматируем профиль
         profile_text = await format_profile_text(profile_data, crypto)
@@ -26,6 +25,8 @@ async def show_profile(
         # Добавляем дополнительный текст, если он есть
         if additional_text:
             profile_text += additional_text
+        
+        message_ids = []  # Список для хранения всех ID сообщений
         
         # Отправляем сообщение с профилем
         if photos and len(photos) > 0:
@@ -38,6 +39,7 @@ async def show_profile(
                     reply_markup=keyboard,
                     parse_mode="HTML"
                 )
+                message_ids.append(sent_message.message_id)
             else:
                 # Если несколько фотографий, отправляем как медиа-группу
                 from aiogram.types import InputMediaPhoto
@@ -61,6 +63,10 @@ async def show_profile(
                     media=media_group
                 )
                 
+                # Сохраняем ID всех сообщений с фотографиями
+                for msg in sent_messages:
+                    message_ids.append(msg.message_id)
+                
                 # Отправляем клавиатуру отдельным сообщением с минимальным текстом
                 keyboard_message = await message.bot.send_message(
                     chat_id=user_id,
@@ -68,7 +74,8 @@ async def show_profile(
                     reply_markup=keyboard
                 )
                 
-                # Возвращаем последнее сообщение для возможного удаления в будущем
+                message_ids.append(keyboard_message.message_id)
+                # Для обратной совместимости возвращаем последнее сообщение
                 sent_message = keyboard_message
         else:
             sent_message = await message.bot.send_message(
@@ -77,8 +84,10 @@ async def show_profile(
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
+            message_ids.append(sent_message.message_id)
         
-        return sent_message
+        # Возвращаем и сообщение, и список ID
+        return sent_message, message_ids
     except Exception as e:
         logger.error(f"Ошибка при показе профиля: {e}", exc_info=True)
         error_msg = await message.bot.send_message(
@@ -86,7 +95,7 @@ async def show_profile(
             text="Произошла ошибка при загрузке профиля.",
             reply_markup=back_to_menu_button()
         )
-        return error_msg
+        return error_msg, [error_msg.message_id]
 
 def decrypt_city(crypto, encrypted_city):
     """Дешифрует город, если он зашифрован"""
@@ -174,11 +183,13 @@ async def show_like_profile(message: Message, user_id: int, state: FSMContext, d
         keyboard = create_like_keyboard(liker_id)
         
         # Отправляем сообщение с профилем
-        sent_message = await show_profile(message, user_id, user_profile, user_photos, keyboard, crypto)
+        sent_message, all_message_ids = await show_profile(message, user_id, user_profile, user_photos, keyboard, crypto)
         
-        # Сохраняем ID сообщения для возможного удаления в будущем
-        # Если отправлена медиа-группа, у нас есть только ID сообщения с клавиатурой
-        await state.update_data(last_like_message_id=sent_message.message_id)
+        # Сохраняем все ID сообщений для возможного удаления в будущем
+        await state.update_data(
+            last_like_message_ids=all_message_ids,
+            current_like_index=current_index
+        )
     except Exception as e:
         logger.error(f"Ошибка при показе профиля лайка: {e}", exc_info=True)
         await message.bot.send_message(
@@ -246,7 +257,7 @@ async def show_compatible_user(message: Message, state: FSMContext, db: Database
         
         # Отправляем сообщение с профилем
         photos = user_profile.get('photos', [])
-        sent_message = await show_profile(
+        sent_message, all_message_ids = await show_profile(
             message, 
             message.chat.id,
             user_profile,
@@ -256,25 +267,13 @@ async def show_compatible_user(message: Message, state: FSMContext, db: Database
             additional_text
         )
         
-        # Если отправлена медиа-группа, нам нужно сохранить ID всех сообщений
-        if photos and len(photos) > 1:
-            # В этом случае sent_message - это сообщение с клавиатурой
-            # Нам нужно получить ID всех сообщений медиа-группы
-            # Но так как у нас нет прямого доступа к этим ID, сохраняем только ID сообщения с клавиатурой
-            await state.update_data(
-                last_profile_messages=[sent_message.message_id],
-                current_compatible_index=current_index,
-                current_profile_id=user_profile['telegramid'],
-                is_initial_view=False  # Сбрасываем флаг после первого показа
-            )
-        else:
-            # Обновляем состояние как обычно
-            await state.update_data(
-                last_profile_messages=[sent_message.message_id],
-                current_compatible_index=current_index,
-                current_profile_id=user_profile['telegramid'],
-                is_initial_view=False  # Сбрасываем флаг после первого показа
-            )
+        # Обновляем состояние с полным списком ID сообщений
+        await state.update_data(
+            last_profile_messages=all_message_ids,
+            current_compatible_index=current_index,
+            current_profile_id=user_profile['telegramid'],
+            is_initial_view=False  # Сбрасываем флаг после первого показа
+        )
     except Exception as e:
         logger.error(f"Критическая ошибка в show_compatible_user: {e}", exc_info=True)
         error_msg = await message.answer(

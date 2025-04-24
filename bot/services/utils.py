@@ -10,27 +10,40 @@ async def delete_previous_messages(message, state):
     """Удаляет предыдущие сообщения бота"""
     try:
         data = await state.get_data()
-        message_ids = data.get('message_ids', [])
-        print(message_ids)
-
-        if not message_ids:
+        
+        # Проверяем все возможные ключи, где могут храниться ID сообщений
+        message_keys = ['message_ids', 'last_profile_messages', 'last_like_message_ids']
+        all_message_ids = []
+        
+        # Собираем все ID сообщений из разных ключей
+        for key in message_keys:
+            ids = data.get(key, [])
+            if ids:
+                all_message_ids.extend(ids)
+                # Очищаем список сообщений в состоянии
+                await state.update_data({key: []})
+        
+        logger.debug(f"Найдено сообщений для удаления: {len(all_message_ids)}")
+        print(f"Сообщения для удаления: {all_message_ids}")
+        
+        if not all_message_ids:
             return
-
+            
         # Удаляем сообщения
         deleted_count = 0
-        for msg_id in message_ids:
+        for msg_id in all_message_ids:
             try:
                 await message.bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
                 deleted_count += 1
             except Exception as e:
-                # Логируем ошибку только на уровне DEBUG, а не ERROR
-                logger.debug(f"Could not delete message {msg_id}: {e}")
-
-        # Очищаем список сообщений
-        await state.update_data(message_ids=[])
-        logger.debug(f"Deleted {deleted_count}/{len(message_ids)} messages")
+                # Логируем ошибку только на уровне DEBUG
+                logger.debug(f"Не удалось удалить сообщение {msg_id}: {e}")
+                
+        logger.debug(f"Удалено {deleted_count}/{len(all_message_ids)} сообщений")
+        
     except Exception as e:
-        logger.debug(f"Error in delete_previous_messages: {e}")
+        logger.debug(f"Ошибка в delete_previous_messages: {e}")
+
 
 def validate_age(age_str: str) -> Optional[int]:
     """Проверяет валидность возраста"""

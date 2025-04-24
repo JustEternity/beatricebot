@@ -112,7 +112,6 @@ async def start_search_handler(callback: CallbackQuery, state: FSMContext, db: D
         
         # Получаем фильтры из состояния
         filters = await state.get_data()
-        logger.info(f"Поиск пользователей для {callback.from_user.id} с фильтрами: {filters}")
         
         # Дешифруем город
         city = decrypt_city(crypto, filters.get('filter_city'))
