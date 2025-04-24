@@ -76,6 +76,9 @@ async def next_compatible_handler(callback: CallbackQuery, state: FSMContext, db
     if current_index not in view_history:
         view_history.append(current_index)
     
+    # Удаляем предыдущее сообщение для избежания ошибок
+    await delete_message_safely(callback.message)
+    
     # ИЗМЕНЕНО: Проверяем, есть ли еще анкеты
     if current_index < len(compatible_users) - 1:
         # Увеличиваем индекс
@@ -90,9 +93,6 @@ async def next_compatible_handler(callback: CallbackQuery, state: FSMContext, db
         
         # Логируем обновленное состояние
         logger.info(f"NEXT: История после: {view_history}, новый индекс: {next_index}, сброшен флаг возврата")
-        
-        # Удаляем предыдущее сообщение для избежания ошибок
-        await delete_message_safely(callback.message)
         
         # Показываем следующего пользователя
         await show_compatible_user(callback.message, state, db, crypto)
