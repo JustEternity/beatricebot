@@ -71,6 +71,14 @@ async def policy_second_handler(message: Message, state: FSMContext, db: Databas
 @router.message(RegistrationStates.POLICY, F.text.in_(["✅ Я согласен", "❌ Я не согласен"]))
 async def policy_handler(message: Message, state: FSMContext):
     try:
+        rules_text = """
+        📚 Правила составления анкеты:
+        1. Используйте реальные фотографии и данные
+        2. Запрещены оскорбительные выражения
+        3. Не указывайте контактные данные
+        4. Анкета не должна нарушать законы РФ
+        """
+        await message.answer(rules_text)
         if message.text == "✅ Я согласен":
             await state.update_data(policy=True)
             await message.answer("🎉 Спасибо! Как вас зовут?", reply_markup=ReplyKeyboardRemove())
