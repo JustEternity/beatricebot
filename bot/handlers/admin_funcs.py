@@ -627,6 +627,7 @@ async def moder_block_reason(message: Message, state: FSMContext, db: Database, 
     )
 
     await db.del_user(user_id)
+    await s3.delete_user_photos(user_id)
 
     await message.answer(f"⛔ Анкета заблокирована")
     await state.update_data(current_moder_index=current_idx + 1)

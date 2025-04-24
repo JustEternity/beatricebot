@@ -152,7 +152,7 @@ async def view_profile_handler(callback: CallbackQuery, state: FSMContext, crypt
 @router.callback_query(F.data == "edit_profile")
 async def edit_profile_handler(callback: CallbackQuery, state: FSMContext):
     await remove_keyboard_if_exists(callback.message)
-    
+
     await delete_previous_messages(callback.message, state)
     await callback.message.edit_text(
         "✏️ Выберите что хотите изменить:",
@@ -170,11 +170,13 @@ async def delete_account_handler(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @router.callback_query(F.data == "agree_del")
-async def delete_account_handler(callback: CallbackQuery, state: FSMContext, db: Database):
+async def delete_account_handler(callback: CallbackQuery, state: FSMContext, db: Database, s3: S3Service):
     await remove_keyboard_if_exists(callback.message)
-   
+
     await delete_previous_messages(callback.message, state)
     res = await db.del_user(callback.from_user.id)
+    await s3.delete_user_photos(callback.from_user.id)
+
     if res:
         await callback.message.answer("✅ Все ваши данные удалены. Для нового использования бота нажмите /start", reply_markup=ReplyKeyboardRemove())
         await state.clear()
@@ -510,7 +512,7 @@ async def process_edit_photos_finish(
 @router.callback_query(F.data == "take_test")
 async def take_test_handler(callback: CallbackQuery, state: FSMContext, db: Database):
     await remove_keyboard_if_exists(callback.message)
-    
+
     await delete_previous_messages(callback.message, state)
 
     user_data = await state.get_data()
