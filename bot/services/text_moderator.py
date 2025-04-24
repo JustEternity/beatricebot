@@ -18,7 +18,7 @@ class TextModerator:
         self.toxicity_model = None
         self._init_dictionaries()
         self.toxicity_threshold = 0.85
-        
+
         if self.use_ai_model:
             self._load_ai_model()
 
@@ -59,28 +59,28 @@ class TextModerator:
         }
 
         self.extremism_dict = {
-            'убей', 'убийство', 'убийца', 'казнить', 'расстрелять', 
+            'убей', 'убийство', 'убийца', 'казнить', 'расстрелять',
             'взорвать', 'взрыв', 'террорист', 'фашист', 'нацист',
             'джихад', 'шахид', 'исламское государство', 'смерть неверным'
         }
 
         self.safe_extremism_context = {
             'борьба с терроризмом', 'против экстремизма',
-            'осуждение насилия', 'против расизма'
+            'осуждение насилия', 'против расизма', 'экстремист', 'расист', 'расик'
         }
 
         self.alcohol_words = {
-            'алкоголь', 'пиво', 'водка', 'вино', 'коньяк', 'пьянка'
+            'алкоголь', 'пиво', 'водка', 'вино', 'коньяк', 'пьянка', 'запой'
         }
 
         self.drug_words = {
-            'наркотик', 'героин', 'кокаин', 'метамфетамин', 'марихуана'
+            'наркотик', 'героин', 'кокаин', 'метамфетамин', 'марихуана', 'наркотики', 'гашиш', 'drug', 'drugs'
         }
 
     def _contains_phrase(self, text: str, phrases: set) -> bool:
         """Проверяет наличие фразы в тексте"""
         lower_text = text.lower()
-        return any(re.search(r'\b' + re.escape(phrase) + r'\b', lower_text) 
+        return any(re.search(r'\b' + re.escape(phrase) + r'\b', lower_text)
                for phrase in phrases)
 
     def check_toxicity(self, text: str) -> Dict[str, Any]:
@@ -88,7 +88,7 @@ class TextModerator:
         lower_text = text.lower()
 
         # Проверка по черным спискам
-        if any(re.search(r'\b' + re.escape(word) + r'\b', lower_text) 
+        if any(re.search(r'\b' + re.escape(word) + r'\b', lower_text)
            for word in self.toxic_words):
             return {'is_toxic': True, 'score': 0.99, 'method': 'word_list'}
 
@@ -100,7 +100,7 @@ class TextModerator:
             try:
                 result = self.toxicity_model(text)[0]
                 return {
-                    'is_toxic': result['label'] == 'toxic' 
+                    'is_toxic': result['label'] == 'toxic'
                               and result['score'] > self.toxicity_threshold,
                     'score': result['score'],
                     'method': 'model'
