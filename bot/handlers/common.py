@@ -240,6 +240,7 @@ async def update_main_menu(message, state: FSMContext, db: Database):
 
 async def show_filters_menu(source, state: FSMContext, db: Database, crypto: CryptoService):
     """Показывает меню фильтров"""
+    await delete_previous_messages(source, state)
     data = await state.get_data()
 
     # Получаем текущие значения фильтров
